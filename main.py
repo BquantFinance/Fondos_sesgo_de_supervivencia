@@ -227,43 +227,57 @@ st.sidebar.markdown("## 🎯 Seleccionar Período")
 
 # Obtener años disponibles
 years = sorted(df_all['Año'].unique())
+year_options = ["Todos los años"] + [str(year) for year in years]
 selected_year = st.sidebar.selectbox(
     "📅 **Año**",
-    years,
-    index=len(years)-2  # Penúltimo año por defecto
+    year_options,
+    index=0  # "Todos los años" por defecto
 )
 
-# Obtener meses para el año seleccionado
-months_in_year = sorted(df_all[df_all['Año'] == selected_year]['Mes'].unique())
 month_names = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
     5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
     9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
-selected_month = st.sidebar.selectbox(
-    "📆 **Mes**",
-    ["Todo el año"] + [month_names.get(m, str(m)) for m in months_in_year],
-    index=0
-)
-
-# Convertir mes seleccionado a número
-if selected_month != "Todo el año":
-    month_num = [k for k, v in month_names.items() if v == selected_month][0] if selected_month in month_names.values() else int(selected_month)
+# Solo mostrar selector de mes si se selecciona un año específico
+if selected_year != "Todos los años":
+    selected_year_num = int(selected_year)
+    # Obtener meses para el año seleccionado
+    months_in_year = sorted(df_all[df_all['Año'] == selected_year_num]['Mes'].unique())
+    
+    selected_month = st.sidebar.selectbox(
+        "📆 **Mes**",
+        ["Todo el año"] + [month_names.get(m, str(m)) for m in months_in_year],
+        index=0
+    )
+    
+    # Convertir mes seleccionado a número
+    if selected_month != "Todo el año":
+        month_num = [k for k, v in month_names.items() if v == selected_month][0] if selected_month in month_names.values() else int(selected_month)
+    else:
+        month_num = None
 else:
+    selected_year_num = None
     month_num = None
+    selected_month = None
 
 # Filtrar datos según selección
-if month_num:
-    period_births = df_births[(df_births['Año'] == selected_year) & (df_births['Mes'] == month_num)]
-    period_deaths = df_deaths[(df_deaths['Año'] == selected_year) & (df_deaths['Mes'] == month_num)]
-    period_mergers = df_all[(df_all['Año'] == selected_year) & (df_all['Mes'] == month_num) & 
+if selected_year == "Todos los años":
+    period_births = df_births
+    period_deaths = df_deaths
+    period_mergers = df_all[df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN']
+    period_label = "Todos los años (2004-2025)"
+elif month_num:
+    period_births = df_births[(df_births['Año'] == selected_year_num) & (df_births['Mes'] == month_num)]
+    period_deaths = df_deaths[(df_deaths['Año'] == selected_year_num) & (df_deaths['Mes'] == month_num)]
+    period_mergers = df_all[(df_all['Año'] == selected_year_num) & (df_all['Mes'] == month_num) & 
                             (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')]
     period_label = f"{selected_month} {selected_year}"
 else:
-    period_births = df_births[df_births['Año'] == selected_year]
-    period_deaths = df_deaths[df_deaths['Año'] == selected_year]
-    period_mergers = df_all[(df_all['Año'] == selected_year) & 
+    period_births = df_births[df_births['Año'] == selected_year_num]
+    period_deaths = df_deaths[df_deaths['Año'] == selected_year_num]
+    period_mergers = df_all[(df_all['Año'] == selected_year_num) & 
                             (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')]
     period_label = f"Año {selected_year}"
 
@@ -322,13 +336,36 @@ with tab1:
         st.markdown(f"<div class='stats-card'><strong>{len(period_births)}</strong> nuevos fondos registrados en {period_label}</div>", unsafe_allow_html=True)
         
         # Preparar datos para mostrar
-        display_births = period_births[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-        display_births = display_births.rename(columns={
-            'Denominacion': 'Nombre del Fondo',
-            'Nº_Registro': 'Nº Registro',
-            'Fecha': 'Fecha Alta'
-        })
-        display_births = display_births.sort_values('Fecha Alta', ascending=False)
+        if selected_year == "Todos los años":
+            display_births = period_births[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
+            display_births = display_births.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Alta',
+                'Año': 'Año'
+            })
+            display_births = display_births.sort_values(['Año', 'Fecha Alta'], ascending=[False, False])
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Alta": st.column_config.DateColumn("Fecha Alta", format="DD/MM/YYYY", width="small"),
+                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
+            }
+        else:
+            display_births = period_births[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
+            display_births = display_births.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Alta'
+            })
+            display_births = display_births.sort_values('Fecha Alta', ascending=False)
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Alta": st.column_config.DateColumn("Fecha Alta", format="DD/MM/YYYY", width="small")
+            }
         
         # Mostrar DataFrame con estilo
         st.dataframe(
@@ -336,21 +373,7 @@ with tab1:
             use_container_width=True,
             height=400,
             hide_index=True,
-            column_config={
-                "Nombre del Fondo": st.column_config.TextColumn(
-                    "Nombre del Fondo",
-                    width="large",
-                ),
-                "Nº Registro": st.column_config.TextColumn(
-                    "Nº Registro",
-                    width="small",
-                ),
-                "Fecha Alta": st.column_config.DateColumn(
-                    "Fecha Alta",
-                    format="DD/MM/YYYY",
-                    width="small",
-                )
-            }
+            column_config=column_config
         )
     else:
         st.info(f"📭 No hay altas registradas en {period_label}")
@@ -359,34 +382,43 @@ with tab2:
     if len(period_deaths) > 0:
         st.markdown(f"<div class='stats-card'><strong>{len(period_deaths)}</strong> fondos liquidados en {period_label}</div>", unsafe_allow_html=True)
         
-        display_deaths = period_deaths[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-        display_deaths = display_deaths.rename(columns={
-            'Denominacion': 'Nombre del Fondo',
-            'Nº_Registro': 'Nº Registro',
-            'Fecha': 'Fecha Baja'
-        })
-        display_deaths = display_deaths.sort_values('Fecha Baja', ascending=False)
+        if selected_year == "Todos los años":
+            display_deaths = period_deaths[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
+            display_deaths = display_deaths.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Baja',
+                'Año': 'Año'
+            })
+            display_deaths = display_deaths.sort_values(['Año', 'Fecha Baja'], ascending=[False, False])
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Baja": st.column_config.DateColumn("Fecha Baja", format="DD/MM/YYYY", width="small"),
+                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
+            }
+        else:
+            display_deaths = period_deaths[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
+            display_deaths = display_deaths.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Baja'
+            })
+            display_deaths = display_deaths.sort_values('Fecha Baja', ascending=False)
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Baja": st.column_config.DateColumn("Fecha Baja", format="DD/MM/YYYY", width="small")
+            }
         
         st.dataframe(
             display_deaths,
             use_container_width=True,
             height=400,
             hide_index=True,
-            column_config={
-                "Nombre del Fondo": st.column_config.TextColumn(
-                    "Nombre del Fondo",
-                    width="large",
-                ),
-                "Nº Registro": st.column_config.TextColumn(
-                    "Nº Registro",
-                    width="small",
-                ),
-                "Fecha Baja": st.column_config.DateColumn(
-                    "Fecha Baja",
-                    format="DD/MM/YYYY",
-                    width="small",
-                )
-            }
+            column_config=column_config
         )
     else:
         st.info(f"📭 No hay bajas registradas en {period_label}")
@@ -395,126 +427,177 @@ with tab3:
     if len(period_mergers) > 0:
         st.markdown(f"<div class='stats-card'><strong>{len(period_mergers)}</strong> fondos fusionados en {period_label}</div>", unsafe_allow_html=True)
         
-        display_mergers = period_mergers[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-        display_mergers = display_mergers.rename(columns={
-            'Denominacion': 'Nombre del Fondo',
-            'Nº_Registro': 'Nº Registro',
-            'Fecha': 'Fecha Fusión'
-        })
-        display_mergers = display_mergers.sort_values('Fecha Fusión', ascending=False)
+        if selected_year == "Todos los años":
+            display_mergers = period_mergers[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
+            display_mergers = display_mergers.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Fusión',
+                'Año': 'Año'
+            })
+            display_mergers = display_mergers.sort_values(['Año', 'Fecha Fusión'], ascending=[False, False])
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Fusión": st.column_config.DateColumn("Fecha Fusión", format="DD/MM/YYYY", width="small"),
+                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
+            }
+        else:
+            display_mergers = period_mergers[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
+            display_mergers = display_mergers.rename(columns={
+                'Denominacion': 'Nombre del Fondo',
+                'Nº_Registro': 'Nº Registro',
+                'Fecha': 'Fecha Fusión'
+            })
+            display_mergers = display_mergers.sort_values('Fecha Fusión', ascending=False)
+            
+            column_config = {
+                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
+                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
+                "Fecha Fusión": st.column_config.DateColumn("Fecha Fusión", format="DD/MM/YYYY", width="small")
+            }
         
         st.dataframe(
             display_mergers,
             use_container_width=True,
             height=400,
             hide_index=True,
-            column_config={
-                "Nombre del Fondo": st.column_config.TextColumn(
-                    "Nombre del Fondo",
-                    width="large",
-                ),
-                "Nº Registro": st.column_config.TextColumn(
-                    "Nº Registro",
-                    width="small",
-                ),
-                "Fecha Fusión": st.column_config.DateColumn(
-                    "Fecha Fusión",
-                    format="DD/MM/YYYY",
-                    width="small",
-                )
-            }
+            column_config=column_config
         )
     else:
         st.info(f"📭 No hay fusiones registradas en {period_label}")
 
 # ============= ANÁLISIS DETALLADO (si está activado) =============
 if show_full_analysis:
-    # Detalle mensual del año seleccionado
-    st.markdown(f"## 📅 Distribución Mensual - {selected_year}")
-    
-    # Datos mensuales para el año seleccionado
-    monthly_births = df_births[df_births['Año'] == selected_year].groupby('Mes').size().reset_index(name='Altas')
-    monthly_deaths = df_deaths[df_deaths['Año'] == selected_year].groupby('Mes').size().reset_index(name='Bajas')
-    monthly_mergers = df_all[(df_all['Año'] == selected_year) & 
-                             (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')].groupby('Mes').size().reset_index(name='Fusiones')
-    
-    # Merge mensual
-    monthly_data = pd.DataFrame({'Mes': range(1, 13)})
-    monthly_data = pd.merge(monthly_data, monthly_births, on='Mes', how='left')
-    monthly_data = pd.merge(monthly_data, monthly_deaths, on='Mes', how='left')
-    monthly_data = pd.merge(monthly_data, monthly_mergers, on='Mes', how='left')
-    monthly_data = monthly_data.fillna(0)
-    monthly_data['Mes_Nombre'] = monthly_data['Mes'].map(month_names)
-    monthly_data['Cambio_Neto'] = monthly_data['Altas'] - monthly_data['Bajas'] - monthly_data['Fusiones']
-    
-    # Gráfico mensual
-    fig_monthly = go.Figure()
-    
-    fig_monthly.add_trace(go.Bar(
-        x=monthly_data['Mes_Nombre'],
-        y=monthly_data['Altas'],
-        name='Altas',
-        marker_color='#10b981',
-        text=monthly_data['Altas'].astype(int),
-        textposition='auto',
-        hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
-    ))
-    
-    fig_monthly.add_trace(go.Bar(
-        x=monthly_data['Mes_Nombre'],
-        y=monthly_data['Bajas'],
-        name='Bajas',
-        marker_color='#ef4444',
-        text=monthly_data['Bajas'].astype(int),
-        textposition='auto',
-        hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
-    ))
-    
-    fig_monthly.add_trace(go.Bar(
-        x=monthly_data['Mes_Nombre'],
-        y=monthly_data['Fusiones'],
-        name='Fusiones',
-        marker_color='#f59e0b',
-        text=monthly_data['Fusiones'].astype(int),
-        textposition='auto',
-        hovertemplate='<b>%{x}</b><br>Fusiones: %{y}<extra></extra>'
-    ))
-    
-    # Resaltar mes seleccionado si aplica
-    if month_num:
-        month_idx = month_num - 1
-        fig_monthly.add_vrect(
-            x0=month_idx - 0.4,
-            x1=month_idx + 0.4,
-            fillcolor="#6366f1",
-            opacity=0.2,
-            line_width=2,
-            line_color="#6366f1",
+    if selected_year == "Todos los años":
+        # Resumen por años cuando se seleccionan todos
+        st.markdown("## 📊 Resumen por Año")
+        
+        # Crear tabla resumen
+        yearly_summary = []
+        for year in sorted(years):
+            year_births = len(df_births[df_births['Año'] == year])
+            year_deaths = len(df_deaths[df_deaths['Año'] == year])
+            year_mergers = len(df_all[(df_all['Año'] == year) & (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')])
+            year_net = year_births - year_deaths - year_mergers
+            
+            yearly_summary.append({
+                'Año': year,
+                '🌱 Altas': year_births,
+                '💀 Bajas': year_deaths,
+                '🔄 Fusiones': year_mergers,
+                '📈 Cambio Neto': year_net
+            })
+        
+        summary_df = pd.DataFrame(yearly_summary)
+        summary_df = summary_df.sort_values('Año', ascending=False)
+        
+        # Mostrar tabla con formato
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            height=600,
+            hide_index=True,
+            column_config={
+                "Año": st.column_config.NumberColumn("Año", format="%d"),
+                "🌱 Altas": st.column_config.NumberColumn("🌱 Altas", format="%d"),
+                "💀 Bajas": st.column_config.NumberColumn("💀 Bajas", format="%d"),
+                "🔄 Fusiones": st.column_config.NumberColumn("🔄 Fusiones", format="%d"),
+                "📈 Cambio Neto": st.column_config.NumberColumn(
+                    "📈 Cambio Neto",
+                    format="%d",
+                    help="Altas - Bajas - Fusiones"
+                )
+            }
         )
-    
-    fig_monthly.update_layout(
-        xaxis_title="",
-        yaxis_title="Número de Fondos",
-        height=400,
-        plot_bgcolor='#1e1e2e',
-        paper_bgcolor='#0e1117',
-        font=dict(color='#cbd5e1'),
-        barmode='group',
-        hovermode='x unified',
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="center",
-            x=0.5
+        
+    elif selected_year != "Todos los años":
+        # Detalle mensual del año seleccionado (solo si hay un año específico)
+        st.markdown(f"## 📅 Distribución Mensual - {selected_year}")
+        # Datos mensuales para el año seleccionado
+        monthly_births = df_births[df_births['Año'] == selected_year_num].groupby('Mes').size().reset_index(name='Altas')
+        monthly_deaths = df_deaths[df_deaths['Año'] == selected_year_num].groupby('Mes').size().reset_index(name='Bajas')
+        monthly_mergers = df_all[(df_all['Año'] == selected_year_num) & 
+                                 (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')].groupby('Mes').size().reset_index(name='Fusiones')
+        
+        # Merge mensual
+        monthly_data = pd.DataFrame({'Mes': range(1, 13)})
+        monthly_data = pd.merge(monthly_data, monthly_births, on='Mes', how='left')
+        monthly_data = pd.merge(monthly_data, monthly_deaths, on='Mes', how='left')
+        monthly_data = pd.merge(monthly_data, monthly_mergers, on='Mes', how='left')
+        monthly_data = monthly_data.fillna(0)
+        monthly_data['Mes_Nombre'] = monthly_data['Mes'].map(month_names)
+        monthly_data['Cambio_Neto'] = monthly_data['Altas'] - monthly_data['Bajas'] - monthly_data['Fusiones']
+        
+        # Gráfico mensual
+        fig_monthly = go.Figure()
+        
+        fig_monthly.add_trace(go.Bar(
+            x=monthly_data['Mes_Nombre'],
+            y=monthly_data['Altas'],
+            name='Altas',
+            marker_color='#10b981',
+            text=monthly_data['Altas'].astype(int),
+            textposition='auto',
+            hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
+        ))
+        
+        fig_monthly.add_trace(go.Bar(
+            x=monthly_data['Mes_Nombre'],
+            y=monthly_data['Bajas'],
+            name='Bajas',
+            marker_color='#ef4444',
+            text=monthly_data['Bajas'].astype(int),
+            textposition='auto',
+            hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
+        ))
+        
+        fig_monthly.add_trace(go.Bar(
+            x=monthly_data['Mes_Nombre'],
+            y=monthly_data['Fusiones'],
+            name='Fusiones',
+            marker_color='#f59e0b',
+            text=monthly_data['Fusiones'].astype(int),
+            textposition='auto',
+            hovertemplate='<b>%{x}</b><br>Fusiones: %{y}<extra></extra>'
+        ))
+        
+        # Resaltar mes seleccionado si aplica
+        if month_num:
+            month_idx = month_num - 1
+            fig_monthly.add_vrect(
+                x0=month_idx - 0.4,
+                x1=month_idx + 0.4,
+                fillcolor="#6366f1",
+                opacity=0.2,
+                line_width=2,
+                line_color="#6366f1",
+            )
+        
+        fig_monthly.update_layout(
+            xaxis_title="",
+            yaxis_title="Número de Fondos",
+            height=400,
+            plot_bgcolor='#1e1e2e',
+            paper_bgcolor='#0e1117',
+            font=dict(color='#cbd5e1'),
+            barmode='group',
+            hovermode='x unified',
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5
+            )
         )
-    )
-    
-    fig_monthly.update_xaxes(gridcolor='#334155', showgrid=False)
-    fig_monthly.update_yaxes(gridcolor='#334155', showgrid=True)
-    
-    st.plotly_chart(fig_monthly, use_container_width=True)
+        
+        fig_monthly.update_xaxes(gridcolor='#334155', showgrid=False)
+        fig_monthly.update_yaxes(gridcolor='#334155', showgrid=True)
+        
+        st.plotly_chart(fig_monthly, use_container_width=True)
 
 # ============= EVOLUCIÓN HISTÓRICA (si está activada) =============
 if show_historical:
@@ -574,16 +657,17 @@ if show_historical:
         hovertemplate='<b>%{x}</b><br>Cambio Neto: %{y:+}<extra></extra>'
     ))
     
-    # Resaltar año seleccionado
-    fig.add_vrect(
-        x0=selected_year - 0.5,
-        x1=selected_year + 0.5,
-        fillcolor="#6366f1",
-        opacity=0.1,
-        line_width=0,
-        annotation_text=f"{selected_year}",
-        annotation_position="top"
-    )
+    # Resaltar año seleccionado (solo si es un año específico)
+    if selected_year != "Todos los años":
+        fig.add_vrect(
+            x0=selected_year_num - 0.5,
+            x1=selected_year_num + 0.5,
+            fillcolor="#6366f1",
+            opacity=0.1,
+            line_width=0,
+            annotation_text=f"{selected_year}",
+            annotation_position="top"
+        )
     
     fig.update_layout(
         title="Altas vs Bajas de Fondos (2004-2025)",
