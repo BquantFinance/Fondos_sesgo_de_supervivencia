@@ -1,7 +1,11 @@
-import streamlit as st
+# Original analysis: Correlation with specific indicators
+            st.markdown("### 🔗 Análisis de Correlación Detallado")
+            
+            if not macro_data.empty:import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime
 import numpy as np
 import re
@@ -213,6 +217,31 @@ def load_macro_data():
     
     except Exception as e:
         st.warning(f"Error loading macro data: {e}")
+        return pd.DataFrame()
+
+# Load S&P 500 data
+@st.cache_data
+def load_sp500_data():
+    """Load S&P 500 data from Yahoo Finance"""
+    try:
+        # Download S&P 500 data
+        sp500 = yf.download('^GSPC', start='2004-01-01', end='2025-12-31', progress=False, multi_level_index=False)
+        sp500 = sp500[['Close', 'Volume']]
+        sp500.columns = ['SP500_Close', 'SP500_Volume']
+        
+        # Calculate returns and moving averages
+        sp500['SP500_Returns'] = sp500['SP500_Close'].pct_change() * 100
+        sp500['SP500_MA50'] = sp500['SP500_Close'].rolling(window=50).mean()
+        sp500['SP500_MA200'] = sp500['SP500_Close'].rolling(window=200).mean()
+        
+        # Add year and month columns
+        sp500['year'] = sp500.index.year
+        sp500['month'] = sp500.index.month
+        
+        return sp500
+    
+    except Exception as e:
+        st.warning(f"Error loading S&P 500 data: {e}")
         return pd.DataFrame()
 
 df = load_and_process_data()
@@ -881,10 +910,250 @@ with tab_list[4]:
         
         # Load macro data
         macro_data = load_macro_data()
+        sp500_data = load_sp500_data()
         
-        if not macro_data.empty:
-            # Prepare fund data by year-month for correlation
-            monthly_fund_data = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
+        if not macro_data.empty or not sp500_data.empty:
+            # Create comprehensive market overview
+            st.markdown("### 📈 Vista Global: Mercados, Fondos y Ciclos Económicos")
+            
+            # Prepare monthly fund data
+            monthly_fund_stats = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
+            monthly_fund_stats = monthly_fund_stats.rename(columns={
+                'NUEVAS_INSCRIPCIONES': 'Altas',
+                'BAJAS': 'Bajas'
+            })
+            monthly_fund_stats['Mortalidad'] = (monthly_fund_stats['Bajas'] / monthly_fund_stats['Altas'] * 100).fillna(0)
+            monthly_fund_stats['Balance'] = monthly_fund_stats['Altas'] - monthly_fund_stats['Bajas']
+            monthly_fund_stats = monthly_fund_stats.reset_index()
+            monthly_fund_stats['date'] = pd.to_datetime(monthly_fund_stats[['year', 'month']].assign(day=1))
+            
+            # Create sophisticated multi-layer visualization
+            fig_overview = make_subplots(
+                rows=3, cols=1,
+                row_heights=[0.5, 0.25, 0.25],
+                vertical_spacing=0.05,
+                subplot_titles=(
+                    'S&P 500 y Fondos Españoles: La Historia Completa',
+                    'Flujo Neto de Fondos',
+                    'Tasa de Mortalidad vs Volatilidad (VIX)'
+                ),
+                specs=[
+                    [{"secondary_y": True}],
+                    [{"secondary_y": False}],
+                    [{"secondary_y": True}]
+                ]
+            )
+            
+            # Panel 1: S&P 500 with fund births/deaths overlay
+            if not sp500_data.empty:
+                # Add S&P 500 as area chart
+                fig_overview.add_trace(
+                    go.Scatter(
+                        x=sp500_data.index,
+                        y=sp500_data['SP500_Close'],
+                        name='S&P 500',
+                        fill='tozeroy',
+                        fillcolor='rgba(67, 56, 202, 0.1)',
+                        line=dict(color='#4338ca', width=2),
+                        hovertemplate='<b>S&P 500</b><br>%{x|%Y-%m-%d}<br>Close: $%{y:,.0f}<extra></extra>'
+                    ),
+                    row=1, col=1,
+                    secondary_y=False
+                )
+                
+                # Add moving averages
+                fig_overview.add_trace(
+                    go.Scatter(
+                        x=sp500_data.index,
+                        y=sp500_data['SP500_MA200'],
+                        name='MA 200',
+                        line=dict(color='#cbd5e1', width=1, dash='dash'),
+                        opacity=0.7,
+                        hovertemplate='<b>MA 200</b><br>%{y:,.0f}<extra></extra>'
+                    ),
+                    row=1, col=1,
+                    secondary_y=False
+                )
+            
+            # Add fund births and deaths as bars on secondary y-axis
+            fig_overview.add_trace(
+                go.Bar(
+                    x=monthly_fund_stats['date'],
+                    y=monthly_fund_stats['Altas'],
+                    name='Altas',
+                    marker_color='rgba(34, 197, 94, 0.6)',
+                    yaxis='y2',
+                    hovertemplate='<b>Altas</b><br>%{x|%Y-%m}<br>Fondos: %{y}<extra></extra>'
+                ),
+                row=1, col=1,
+                secondary_y=True
+            )
+            
+            fig_overview.add_trace(
+                go.Bar(
+                    x=monthly_fund_stats['date'],
+                    y=-monthly_fund_stats['Bajas'],
+                    name='Bajas',
+                    marker_color='rgba(220, 38, 38, 0.6)',
+                    yaxis='y2',
+                    hovertemplate='<b>Bajas</b><br>%{x|%Y-%m}<br>Fondos: %{y}<extra></extra>'
+                ),
+                row=1, col=1,
+                secondary_y=True
+            )
+            
+            # Panel 2: Net fund flow with color coding
+            colors = ['#22c55e' if x >= 0 else '#dc2626' for x in monthly_fund_stats['Balance']]
+            fig_overview.add_trace(
+                go.Bar(
+                    x=monthly_fund_stats['date'],
+                    y=monthly_fund_stats['Balance'],
+                    name='Balance Neto',
+                    marker_color=colors,
+                    hovertemplate='<b>Balance</b><br>%{x|%Y-%m}<br>Neto: %{y:+}<extra></extra>',
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+            
+            # Panel 3: Mortality Rate vs VIX (if available)
+            fig_overview.add_trace(
+                go.Scatter(
+                    x=monthly_fund_stats['date'],
+                    y=monthly_fund_stats['Mortalidad'],
+                    name='Tasa Mortalidad (%)',
+                    line=dict(color='#dc2626', width=2),
+                    hovertemplate='<b>Mortalidad</b><br>%{x|%Y-%m}<br>%{y:.1f}%<extra></extra>'
+                ),
+                row=3, col=1,
+                secondary_y=False
+            )
+            
+            if not macro_data.empty and 'VIX' in macro_data.columns:
+                # Aggregate VIX to monthly
+                vix_monthly = macro_data.groupby(['year', 'month'])['VIX'].mean().reset_index()
+                vix_monthly['date'] = pd.to_datetime(vix_monthly[['year', 'month']].assign(day=1))
+                
+                fig_overview.add_trace(
+                    go.Scatter(
+                        x=vix_monthly['date'],
+                        y=vix_monthly['VIX'],
+                        name='VIX',
+                        line=dict(color='#f59e0b', width=2),
+                        opacity=0.7,
+                        hovertemplate='<b>VIX</b><br>%{x|%Y-%m}<br>%{y:.1f}<extra></extra>'
+                    ),
+                    row=3, col=1,
+                    secondary_y=True
+                )
+            
+            # Add crisis period annotations
+            crisis_periods = [
+                {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01", "color": "rgba(220, 38, 38, 0.1)"},
+                {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01", "color": "rgba(251, 191, 36, 0.1)"},
+                {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01", "color": "rgba(139, 92, 246, 0.1)"}
+            ]
+            
+            for period in crisis_periods:
+                for row in [1, 2, 3]:
+                    fig_overview.add_vrect(
+                        x0=period["start"],
+                        x1=period["end"],
+                        fillcolor=period["color"],
+                        layer="below",
+                        line_width=0,
+                        annotation_text=period["name"] if row == 1 else None,
+                        annotation_position="top",
+                        row=row, col=1
+                    )
+            
+            # Update layout
+            fig_overview.update_xaxes(
+                gridcolor='#334155',
+                showgrid=False,
+                zeroline=False,
+                rangeslider_visible=False
+            )
+            
+            fig_overview.update_yaxes(
+                gridcolor='#334155',
+                showgrid=True,
+                zeroline=True,
+                zerolinecolor='#64748b',
+                zerolinewidth=1
+            )
+            
+            # Update y-axis titles
+            fig_overview.update_yaxes(title_text="S&P 500 Index", row=1, col=1, secondary_y=False)
+            fig_overview.update_yaxes(title_text="Número de Fondos", row=1, col=1, secondary_y=True)
+            fig_overview.update_yaxes(title_text="Balance Neto", row=2, col=1)
+            fig_overview.update_yaxes(title_text="Mortalidad (%)", row=3, col=1, secondary_y=False)
+            fig_overview.update_yaxes(title_text="VIX", row=3, col=1, secondary_y=True)
+            
+            fig_overview.update_layout(
+                height=900,
+                plot_bgcolor='#1a1f2e',
+                paper_bgcolor='#0e1117',
+                font=dict(color='#cbd5e1', size=11),
+                hovermode='x unified',
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=1.05,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor='rgba(26, 31, 46, 0.8)',
+                    bordercolor='#334155',
+                    borderwidth=1
+                ),
+                margin=dict(t=100, b=50)
+            )
+            
+            st.plotly_chart(fig_overview, use_container_width=True)
+            
+            # Key insights from the combined view
+            if not sp500_data.empty:
+                # Calculate correlation between S&P 500 and fund mortality
+                sp500_monthly = sp500_data.groupby(['year', 'month'])['SP500_Returns'].mean().reset_index()
+                merged_for_corr = monthly_fund_stats.merge(
+                    sp500_monthly,
+                    on=['year', 'month'],
+                    how='inner'
+                )
+                
+                if len(merged_for_corr) > 10:
+                    corr_sp500_mortality = merged_for_corr['Mortalidad'].corr(merged_for_corr['SP500_Returns'])
+                    
+                    st.markdown("""
+                    <div class="info-box">
+                        <h4>📊 Insights del Análisis Integrado</h4>
+                        <ul style="line-height: 1.8;">
+                            <li>Correlación S&P 500 Returns vs Mortalidad: <strong>{:.3f}</strong></li>
+                            <li>Las crisis globales (áreas sombreadas) coinciden con picos de mortalidad</li>
+                            <li>La volatilidad (VIX) tiende a anticipar aumentos en liquidaciones</li>
+                            <li>Los mercados alcistas no garantizan supervivencia de fondos locales</li>
+                        </ul>
+                    </div>
+                    """.format(corr_sp500_mortality), unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Original macro analysis continues below
+            st.markdown("---")
+            
+            # Original analysis: Correlation with specific indicators
+            st.markdown("### 🔗 Análisis de Correlación Detallado")
+            
+            if not macro_data.empty:
+                # Prepare fund data by year-month for correlation (reuse from above if possible)
+                if 'monthly_fund_data' not in locals():
+                    monthly_fund_data = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
+                    monthly_fund_data = monthly_fund_data.rename(columns={
+                        'NUEVAS_INSCRIPCIONES': 'Altas',
+                        'BAJAS': 'Bajas'
+                    })
+                    monthly_fund_data['Mortalidad'] = (monthly_fund_data['Bajas'] / monthly_fund_data['Altas'] * 100).fillna(0)
+                    monthly_fund_data = monthly_fund_data.reset_index()
             monthly_fund_data = monthly_fund_data.rename(columns={
                 'NUEVAS_INSCRIPCIONES': 'Altas',
                 'BAJAS': 'Bajas'
@@ -962,12 +1231,12 @@ with tab_list[4]:
                     xaxis_title="Fecha",
                     yaxis=dict(
                         title=correlation_metric,
-                        titlefont=dict(color='#dc2626'),
+                        title_font=dict(color='#dc2626'),
                         tickfont=dict(color='#dc2626')
                     ),
                     yaxis2=dict(
                         title=selected_indicator.replace('_', ' '),
-                        titlefont=dict(color='#4338ca'),
+                        title_font=dict(color='#4338ca'),
                         tickfont=dict(color='#4338ca'),
                         overlaying='y',
                         side='right'
