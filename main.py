@@ -1,3 +1,4 @@
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -23,7 +24,6 @@ st.markdown("""
         background-color: #0e1117;
     }
     
-    /* Metrics styling */
     [data-testid="metric-container"] {
         background: linear-gradient(135deg, #1a1f2e 0%, #242b3d 100%);
         padding: 1.2rem;
@@ -43,7 +43,6 @@ st.markdown("""
         font-weight: 600;
     }
     
-    /* Headers */
     h1 {
         color: #f1f5f9;
         font-weight: 400;
@@ -93,20 +92,6 @@ st.markdown("""
         color: #cbd5e1;
     }
     
-    .summary-box {
-        background: #1a1f2e;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        border: 1px solid #334155;
-    }
-    
-    /* Tables */
-    .dataframe {
-        font-size: 13px;
-    }
-    
-    /* Sidebar */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #1a1f2e 0%, #0e1117 100%);
     }
@@ -145,16 +130,13 @@ st.markdown("""
 def load_and_process_data():
     df = pd.read_csv('cnmv_funds_data_RAW_final_multipage.csv')
     
-    # Extract date from filename
     def extract_date_from_filename(filename):
         match = re.search(r'(\d{2})-(\d{2})-(\d{4})_al_(\d{2})-(\d{2})-(\d{4})', filename)
         if match:
-            # Use end date of bulletin period
             end_date = pd.to_datetime(f"{match.group(6)}-{match.group(5)}-{match.group(4)}", format='%Y-%m-%d')
             return end_date
         return None
     
-    # Add date columns
     df['date'] = df['file'].apply(extract_date_from_filename)
     df = df.dropna(subset=['date'])
     df['year'] = df['date'].dt.year
@@ -162,7 +144,6 @@ def load_and_process_data():
     df['year_month'] = df['date'].dt.to_period('M')
     df['month_name'] = df['date'].dt.strftime('%B')
     
-    # Translate status for better readability
     df['status_esp'] = df['status'].map({
         'NUEVAS_INSCRIPCIONES': 'Altas',
         'BAJAS': 'Bajas'
@@ -173,20 +154,18 @@ def load_and_process_data():
 # Load macro data from FRED
 @st.cache_data
 def load_macro_data():
-    """Load macroeconomic data from FRED"""
     try:
         start_date = '2004-01-01'
         end_date = '2025-12-31'
         
-        # Dictionary of indicators to fetch
         indicators = {
-            'IRLTLT01ESM156N': 'Spanish_10Y_Bond',  # Spanish 10-year government bond yield
-            'CLVMNACSCAB1GQES': 'Spain_GDP_Growth',  # Spain GDP growth
-            'LRHUTTTTESM156S': 'Spain_Unemployment',  # Spain unemployment rate
-            'DEXESUS': 'EUR_USD',  # EUR/USD exchange rate
-            'VIXCLS': 'VIX',  # VIX volatility index
-            'DGS10': 'US_10Y_Bond',  # US 10-year treasury (as reference)
-            'FEDFUNDS': 'Fed_Rate',  # Federal funds rate (as reference)
+            'IRLTLT01ESM156N': 'Spanish_10Y_Bond',
+            'CLVMNACSCAB1GQES': 'Spain_GDP_Growth',
+            'LRHUTTTTESM156S': 'Spain_Unemployment',
+            'DEXESUS': 'EUR_USD',
+            'VIXCLS': 'VIX',
+            'DGS10': 'US_10Y_Bond',
+            'FEDFUNDS': 'Fed_Rate',
         }
         
         macro_data = pd.DataFrame()
@@ -202,10 +181,7 @@ def load_macro_data():
             except:
                 continue
         
-        # Forward fill missing values
         macro_data = macro_data.ffill()
-        
-        # Add year and month columns
         macro_data['year'] = macro_data.index.year
         macro_data['month'] = macro_data.index.month
         
@@ -218,19 +194,15 @@ def load_macro_data():
 # Load S&P 500 data
 @st.cache_data
 def load_sp500_data():
-    """Load S&P 500 data from Yahoo Finance"""
     try:
-        # Download S&P 500 data
         sp500 = yf.download('^GSPC', start='2004-01-01', end='2025-12-31', progress=False, multi_level_index=False)
         sp500 = sp500[['Close', 'Volume']]
         sp500.columns = ['SP500_Close', 'SP500_Volume']
         
-        # Calculate returns and moving averages
         sp500['SP500_Returns'] = sp500['SP500_Close'].pct_change() * 100
         sp500['SP500_MA50'] = sp500['SP500_Close'].rolling(window=50).mean()
         sp500['SP500_MA200'] = sp500['SP500_Close'].rolling(window=200).mean()
         
-        # Add year and month columns
         sp500['year'] = sp500.index.year
         sp500['month'] = sp500.index.month
         
@@ -240,6 +212,7 @@ def load_sp500_data():
         st.warning(f"Error loading S&P 500 data: {e}")
         return pd.DataFrame()
 
+# Load main data
 df = load_and_process_data()
 
 # Calculate key metrics
@@ -255,7 +228,7 @@ net_change = total_births - total_deaths
 st.sidebar.markdown("## 🔍 Filtros de Análisis")
 st.sidebar.markdown("---")
 
-# Year filter with "Todos los años" option
+# Year filter
 years_available = sorted(df['year'].unique())
 year_filter_type = st.sidebar.radio(
     "Filtro de Años",
@@ -273,7 +246,7 @@ else:
         help="Seleccione uno o varios años para analizar"
     )
 
-# Month filter with "Todos los meses" option
+# Month filter
 months_order = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 months_esp = {
@@ -316,11 +289,9 @@ if status_filter == 'Solo Altas':
 elif status_filter == 'Solo Bajas':
     filtered_df = filtered_df[filtered_df['status'] == 'BAJAS']
 
+# Display options
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 📈 Opciones de Visualización")
-show_monthly_detail = st.sidebar.checkbox("Mostrar detalle mensual", value=True)
-show_gestoras = st.sidebar.checkbox("Mostrar análisis por gestoras", value=True)
-show_raw_data = st.sidebar.checkbox("Mostrar datos brutos", value=False)
 show_macro_analysis = st.sidebar.checkbox("Mostrar análisis macro", value=True)
 
 # Main metrics
@@ -370,7 +341,7 @@ with col4:
         help="Diferencia entre altas y bajas"
     )
 
-# Important note about mortality rate
+# Note about mortality rate
 if mortality_rate > 100:
     st.info(f"""
     📌 **Nota sobre la Tasa de Mortalidad:** Una tasa del {mortality_rate:.1f}% indica que por cada 100 fondos creados, 
@@ -387,18 +358,16 @@ yearly_stats['Cambio_Neto'] = yearly_stats['Altas'] - yearly_stats['Bajas']
 yearly_stats['Tasa_Mortalidad'] = (yearly_stats['Bajas'] / yearly_stats['Altas'] * 100).fillna(0).round(1)
 yearly_stats = yearly_stats.reset_index()
 
-# Tabs for different views
-tabs = ["📈 **Análisis Temporal**", "📋 **Datos Transaccionales**", "🏢 **Análisis por Gestoras**", "🔍 **Búsqueda de Fondos**", "🌍 **Análisis Macro**"]
-
+# Tabs
+tabs = ["📈 **Análisis Temporal**", "🔍 **Búsqueda de Fondos**", "🌍 **Análisis Macro**"]
 tab_list = st.tabs(tabs)
 
+# Tab 1: Temporal Analysis
 with tab_list[0]:
-    # Historical Evolution Chart
     st.markdown("### Evolución Histórica de Altas y Bajas")
     
     fig1 = go.Figure()
     
-    # Add births
     fig1.add_trace(go.Bar(
         x=yearly_stats['year'],
         y=yearly_stats['Altas'],
@@ -409,7 +378,6 @@ with tab_list[0]:
         hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
     ))
     
-    # Add deaths
     fig1.add_trace(go.Bar(
         x=yearly_stats['year'],
         y=-yearly_stats['Bajas'],
@@ -420,7 +388,6 @@ with tab_list[0]:
         hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
     ))
     
-    # Add net change line
     fig1.add_trace(go.Scatter(
         x=yearly_stats['year'],
         y=yearly_stats['Cambio_Neto'],
@@ -455,327 +422,17 @@ with tab_list[0]:
     fig1.update_yaxes(gridcolor='#334155', showgrid=True)
     
     st.plotly_chart(fig1, use_container_width=True)
-    
-    # Mortality Rate Evolution
-    st.markdown("### Evolución de la Tasa de Mortalidad Anual")
-    
-    fig2 = go.Figure()
-    
-    # Prepare colors based on rate
-    colors = ['#dc2626' if rate > 100 else '#f59e0b' if rate > 50 else '#22c55e' 
-              for rate in yearly_stats['Tasa_Mortalidad']]
-    
-    fig2.add_trace(go.Bar(
-        x=yearly_stats['year'],
-        y=yearly_stats['Tasa_Mortalidad'],
-        marker_color=colors,
-        text=[f"{rate:.0f}%" for rate in yearly_stats['Tasa_Mortalidad']],
-        textposition='outside',
-        hovertemplate='<b>%{x}</b><br>Tasa de Mortalidad: %{y:.1f}%<extra></extra>'
-    ))
-    
-    fig2.add_hline(y=100, line_color="#dc2626", line_width=1.5, line_dash="dash",
-                   annotation_text="100% (Equilibrio)")
-    
-    fig2.update_layout(
-        xaxis_title="Año",
-        yaxis_title="Tasa de Mortalidad (%)",
-        height=350,
-        plot_bgcolor='#1a1f2e',
-        paper_bgcolor='#0e1117',
-        font=dict(color='#cbd5e1', size=12),
-        showlegend=False
-    )
-    
-    fig2.update_xaxes(gridcolor='#334155', showgrid=False)
-    fig2.update_yaxes(gridcolor='#334155', showgrid=True)
-    
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # Cumulative Impact
-    st.markdown("### Impacto Acumulado")
-    
-    yearly_stats['Cumulative_Net'] = yearly_stats['Cambio_Neto'].cumsum()
-    
-    fig3 = go.Figure()
-    
-    fig3.add_trace(go.Scatter(
-        x=yearly_stats['year'],
-        y=yearly_stats['Cumulative_Net'],
-        mode='lines+markers',
-        fill='tozeroy',
-        fillcolor='rgba(220, 38, 38, 0.1)',
-        line=dict(color='#dc2626', width=2.5),
-        marker=dict(size=7),
-        hovertemplate='<b>%{x}</b><br>Balance Acumulado: %{y:,}<extra></extra>'
-    ))
-    
-    fig3.add_hline(y=0, line_color="#64748b", line_width=1, line_dash="dash")
-    
-    fig3.update_layout(
-        xaxis_title="Año",
-        yaxis_title="Cambio Neto Acumulado",
-        height=350,
-        plot_bgcolor='#1a1f2e',
-        paper_bgcolor='#0e1117',
-        font=dict(color='#cbd5e1', size=12),
-        showlegend=False
-    )
-    
-    fig3.update_xaxes(gridcolor='#334155', showgrid=False)
-    fig3.update_yaxes(gridcolor='#334155', showgrid=True)
-    
-    st.plotly_chart(fig3, use_container_width=True)
 
+# Tab 2: Fund Search
 with tab_list[1]:
-    st.markdown("### 📋 Datos Transaccionales de Fondos")
-    
-    # Combine births and deaths into a single transactional view
-    # Prepare births data
-    births_trans = births[['date', 'Nombre', 'N_Registro', 'Gestora', 'Depositaria']].copy()
-    births_trans['Tipo_Operacion'] = '🌱 Alta'
-    births_trans['Color_Tag'] = 'success'
-    
-    # Prepare deaths data
-    deaths_trans = deaths[['date', 'Nombre', 'N_Registro', 'Gestora', 'Depositaria']].copy()
-    deaths_trans['Tipo_Operacion'] = '💀 Baja'
-    deaths_trans['Color_Tag'] = 'danger'
-    
-    # Combine both
-    transactions_df = pd.concat([births_trans, deaths_trans], ignore_index=True)
-    transactions_df = transactions_df.sort_values('date', ascending=False)
-    
-    # Add year and month for filtering
-    transactions_df['year'] = transactions_df['date'].dt.year
-    transactions_df['month'] = transactions_df['date'].dt.month
-    transactions_df['month_name'] = transactions_df['date'].dt.strftime('%B')
-    
-    # Apply filters from sidebar
-    filtered_trans = transactions_df[transactions_df['year'].isin(selected_years)]
-    
-    # Apply month filter
-    reverse_months_esp = {
-        'Enero': 'January', 'Febrero': 'February', 'Marzo': 'March', 'Abril': 'April',
-        'Mayo': 'May', 'Junio': 'June', 'Julio': 'July', 'Agosto': 'August',
-        'Septiembre': 'September', 'Octubre': 'October', 'Noviembre': 'November', 'Diciembre': 'December'
-    }
-    selected_months_eng_trans = [reverse_months_esp.get(m, m) for m in selected_months]
-    filtered_trans = filtered_trans[filtered_trans['month_name'].isin(selected_months_eng_trans)]
-    
-    # Apply status filter
-    if status_filter == 'Solo Altas':
-        filtered_trans = filtered_trans[filtered_trans['Tipo_Operacion'] == '🌱 Alta']
-    elif status_filter == 'Solo Bajas':
-        filtered_trans = filtered_trans[filtered_trans['Tipo_Operacion'] == '💀 Baja']
-    
-    # Additional filters for transactional data
-    col1, col2, col3 = st.columns([2, 1, 1])
-    
-    with col1:
-        search_trans = st.text_input(
-            "🔍 Buscar en transacciones",
-            placeholder="Nombre del fondo, gestora o nº registro...",
-            key="search_trans"
-        )
-    
-    with col2:
-        # Date range selector
-        date_range = st.selectbox(
-            "Período",
-            options=['Todo', 'Último mes', 'Últimos 3 meses', 'Último año', 'Últimos 5 años'],
-            index=0,
-            key="date_range_trans"
-        )
-    
-    with col3:
-        # Sort order
-        sort_order = st.selectbox(
-            "Ordenar por",
-            options=['Fecha (más reciente)', 'Fecha (más antiguo)', 'Nombre A-Z', 'Nombre Z-A'],
-            index=0,
-            key="sort_trans"
-        )
-    
-    # Apply search filter
-    if search_trans:
-        mask = (
-            filtered_trans['Nombre'].str.contains(search_trans.upper(), case=False, na=False) |
-            filtered_trans['Gestora'].str.contains(search_trans.upper(), case=False, na=False) |
-            filtered_trans['N_Registro'].astype(str).str.contains(search_trans, na=False)
-        )
-        filtered_trans = filtered_trans[mask]
-    
-    # Apply date range filter
-    if date_range != 'Todo':
-        from datetime import datetime, timedelta
-        today = datetime.now()
-        if date_range == 'Último mes':
-            cutoff_date = today - timedelta(days=30)
-        elif date_range == 'Últimos 3 meses':
-            cutoff_date = today - timedelta(days=90)
-        elif date_range == 'Último año':
-            cutoff_date = today - timedelta(days=365)
-        elif date_range == 'Últimos 5 años':
-            cutoff_date = today - timedelta(days=1825)
-        
-        filtered_trans = filtered_trans[filtered_trans['date'] >= cutoff_date]
-    
-    # Apply sorting
-    if sort_order == 'Fecha (más reciente)':
-        filtered_trans = filtered_trans.sort_values('date', ascending=False)
-    elif sort_order == 'Fecha (más antiguo)':
-        filtered_trans = filtered_trans.sort_values('date', ascending=True)
-    elif sort_order == 'Nombre A-Z':
-        filtered_trans = filtered_trans.sort_values('Nombre', ascending=True)
-    elif sort_order == 'Nombre Z-A':
-        filtered_trans = filtered_trans.sort_values('Nombre', ascending=False)
-    
-    # Display summary statistics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    total_transactions = len(filtered_trans)
-    total_altas = len(filtered_trans[filtered_trans['Tipo_Operacion'] == '🌱 Alta'])
-    total_bajas = len(filtered_trans[filtered_trans['Tipo_Operacion'] == '💀 Baja'])
-    
-    with col1:
-        st.metric("Total Transacciones", f"{total_transactions:,}")
-    
-    with col2:
-        st.metric("Altas", f"{total_altas:,}",
-                  delta=f"{(total_altas/total_transactions*100):.1f}%" if total_transactions > 0 else "0%")
-    
-    with col3:
-        st.metric("Bajas", f"{total_bajas:,}",
-                  delta=f"{(total_bajas/total_transactions*100):.1f}%" if total_transactions > 0 else "0%")
-    
-    with col4:
-        balance_trans = total_altas - total_bajas
-        st.metric("Balance", f"{balance_trans:+,}",
-                  delta="Positivo" if balance_trans > 0 else "Negativo" if balance_trans < 0 else "Neutro")
-    
-    # Display transactional data
-    st.markdown("#### Detalle de Transacciones")
-    
-    if len(filtered_trans) > 0:
-        # Prepare display dataframe
-        display_trans = filtered_trans[['date', 'Tipo_Operacion', 'Nombre', 'N_Registro', 'Gestora', 'Depositaria']].copy()
-        display_trans['date'] = display_trans['date'].dt.strftime('%Y-%m-%d')
-        display_trans = display_trans.rename(columns={
-            'date': 'Fecha',
-            'Tipo_Operacion': 'Operación',
-            'N_Registro': 'Nº Registro'
-        })
-        
-        # Clean N_Registro column (remove NaN and convert to int where possible)
-        display_trans['Nº Registro'] = display_trans['Nº Registro'].apply(
-            lambda x: int(x) if pd.notna(x) else ''
-        )
-        
-        st.dataframe(
-            display_trans,
-            use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "Fecha": st.column_config.TextColumn("Fecha", width="small"),
-                "Operación": st.column_config.TextColumn("Operación", width="small"),
-                "Nombre": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Gestora": st.column_config.TextColumn("Gestora", width="medium"),
-                "Depositaria": st.column_config.TextColumn("Depositaria", width="medium")
-            }
-        )
-        
-        # Download button
-        csv_trans = display_trans.to_csv(index=False)
-        st.download_button(
-            label="📥 Descargar transacciones en CSV",
-            data=csv_trans,
-            file_name='transacciones_fondos.csv',
-            mime='text/csv',
-        )
-    else:
-        st.info("No se encontraron transacciones con los criterios especificados.")
-
-with tab_list[2]:
-    if show_gestoras:
-        st.markdown("### Top Gestoras por Número de Fondos Registrados")
-        
-        # Analysis by management company (births)
-        births_by_gestora = births.dropna(subset=['Gestora']).groupby('Gestora').size().reset_index(name='Altas')
-        top_gestoras_births = births_by_gestora.nlargest(20, 'Altas')
-        
-        fig4 = go.Figure()
-        
-        fig4.add_trace(go.Bar(
-            y=top_gestoras_births['Gestora'][::-1],
-            x=top_gestoras_births['Altas'][::-1],
-            orientation='h',
-            marker_color='#4338ca',
-            text=top_gestoras_births['Altas'][::-1],
-            textposition='outside',
-            hovertemplate='<b>%{y}</b><br>Fondos Registrados: %{x}<extra></extra>'
-        ))
-        
-        fig4.update_layout(
-            xaxis_title="Número de Fondos Registrados",
-            yaxis_title="",
-            height=600,
-            plot_bgcolor='#1a1f2e',
-            paper_bgcolor='#0e1117',
-            font=dict(color='#cbd5e1', size=11),
-            showlegend=False,
-            margin=dict(l=350)
-        )
-        
-        fig4.update_xaxes(gridcolor='#334155', showgrid=True)
-        fig4.update_yaxes(gridcolor='#334155', showgrid=False, tickfont=dict(size=10))
-        
-        st.plotly_chart(fig4, use_container_width=True)
-        
-        # Table with gestoras data
-        st.markdown("#### Detalle de Gestoras")
-        
-        gestora_summary = births_by_gestora.merge(
-            deaths.dropna(subset=['Gestora']).groupby('Gestora').size().reset_index(name='Bajas'),
-            on='Gestora',
-            how='outer'
-        ).fillna(0)
-        
-        gestora_summary['Balance'] = gestora_summary['Altas'] - gestora_summary['Bajas']
-        gestora_summary['Tasa_Supervivencia_%'] = ((gestora_summary['Altas'] - gestora_summary['Bajas']) / gestora_summary['Altas'] * 100).fillna(0).round(1)
-        gestora_summary = gestora_summary.sort_values('Altas', ascending=False).head(30)
-        
-        st.dataframe(
-            gestora_summary,
-            use_container_width=True,
-            height=400,
-            hide_index=True,
-            column_config={
-                "Gestora": st.column_config.TextColumn("Gestora", width="large"),
-                "Altas": st.column_config.NumberColumn("Altas", format="%d"),
-                "Bajas": st.column_config.NumberColumn("Bajas", format="%d"),
-                "Balance": st.column_config.NumberColumn("Balance", format="%d"),
-                "Tasa_Supervivencia_%": st.column_config.NumberColumn("Tasa Supervivencia (%)", format="%.1f")
-            }
-        )
-
-with tab_list[3]:
     st.markdown("### 🔍 Búsqueda y Ciclo de Vida de Fondos")
     
-    # Create a comprehensive fund lifecycle dataframe
-    # Get all unique funds with their birth dates (filter out records without N_Registro)
     births_lifecycle = births[births['N_Registro'].notna()][['Nombre', 'N_Registro', 'date', 'Gestora', 'Depositaria']].copy()
     births_lifecycle = births_lifecycle.rename(columns={'date': 'Fecha_Alta'})
-    births_lifecycle['Estado'] = 'Alta'
     
-    # Get all unique funds with their death dates (filter out records without N_Registro)
     deaths_lifecycle = deaths[deaths['N_Registro'].notna()][['Nombre', 'N_Registro', 'date']].copy()
     deaths_lifecycle = deaths_lifecycle.rename(columns={'date': 'Fecha_Baja'})
-    deaths_lifecycle['Estado'] = 'Baja'
     
-    # Merge to create lifecycle view
-    # First, get unique funds from births
     unique_funds = births_lifecycle.groupby('N_Registro').agg({
         'Nombre': 'first',
         'Fecha_Alta': 'min',
@@ -783,21 +440,16 @@ with tab_list[3]:
         'Depositaria': 'first'
     }).reset_index()
     
-    # Then add death dates if they exist
     death_dates = deaths_lifecycle.groupby('N_Registro').agg({
-        'Fecha_Baja': 'min',
-        'Nombre': 'first'  # Get the name from death record too
+        'Fecha_Baja': 'min'
     }).reset_index()
-    death_dates = death_dates.rename(columns={'Nombre': 'Nombre_Baja'})
     
-    fund_lifecycle = unique_funds.merge(death_dates[['N_Registro', 'Fecha_Baja']], on='N_Registro', how='left')
+    fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
     
-    # Calculate lifespan
     fund_lifecycle['Vida_Dias'] = (fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days
     fund_lifecycle['Vida_Anos'] = (fund_lifecycle['Vida_Dias'] / 365.25).round(1)
     fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '💀 Liquidado' if pd.notna(x) else '✅ Activo')
     
-    # Search options
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -814,11 +466,9 @@ with tab_list[3]:
             index=0
         )
     
-    # Filter based on search
     filtered_lifecycle = fund_lifecycle.copy()
     
     if search_term:
-        # Search in both name and registry number
         mask = (
             filtered_lifecycle['Nombre'].str.contains(search_term.upper(), case=False, na=False) |
             filtered_lifecycle['N_Registro'].astype(str).str.contains(search_term, na=False)
@@ -830,12 +480,11 @@ with tab_list[3]:
     elif status_search == 'Liquidados':
         filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()]
     
-    # Display statistics
-    col1, col2, col3, col4 = st.columns(4)
-    
     total_in_search = len(filtered_lifecycle)
     active_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].isna()])
     liquidated_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()])
+    
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric("Total Fondos", f"{total_in_search:,}")
@@ -848,71 +497,34 @@ with tab_list[3]:
         st.metric("Liquidados", f"{liquidated_in_search:,}",
                   delta=f"{(liquidated_in_search/total_in_search*100):.1f}%" if total_in_search > 0 else "0%")
     
-    with col4:
-        avg_lifespan = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]['Vida_Anos'].mean()
-        st.metric("Vida Media (años)", f"{avg_lifespan:.1f}" if pd.notna(avg_lifespan) else "N/A")
-    
-    # Display the lifecycle table
-    st.markdown("#### Detalle de Fondos")
-    
     if total_in_search > 0:
-        # Prepare display dataframe
         display_lifecycle = filtered_lifecycle[['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 
-                                               'Vida_Anos', 'Estado_Actual', 'Gestora', 'Depositaria']].copy()
+                                               'Vida_Anos', 'Estado_Actual', 'Gestora']].copy()
         
-        # Convert N_Registro to integer for better display
         display_lifecycle['N_Registro'] = display_lifecycle['N_Registro'].astype(int)
-        
-        # Sort by registry number or date
         display_lifecycle = display_lifecycle.sort_values('Fecha_Alta', ascending=False)
         
-        # Format dates for display
         display_lifecycle['Fecha_Alta'] = display_lifecycle['Fecha_Alta'].dt.strftime('%Y-%m-%d')
         display_lifecycle['Fecha_Baja'] = display_lifecycle['Fecha_Baja'].dt.strftime('%Y-%m-%d')
         
         st.dataframe(
             display_lifecycle,
             use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "N_Registro": st.column_config.NumberColumn("Nº Registro", format="%d", width="small"),
-                "Nombre": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Fecha_Alta": st.column_config.TextColumn("Fecha Alta", width="small"),
-                "Fecha_Baja": st.column_config.TextColumn("Fecha Baja", width="small"),
-                "Vida_Anos": st.column_config.NumberColumn("Vida (años)", format="%.1f", width="small"),
-                "Estado_Actual": st.column_config.TextColumn("Estado", width="small"),
-                "Gestora": st.column_config.TextColumn("Gestora", width="medium"),
-                "Depositaria": st.column_config.TextColumn("Depositaria", width="medium")
-            }
+            height=400,
+            hide_index=True
         )
-        
-        # Download button for lifecycle data
-        csv_lifecycle = display_lifecycle.to_csv(index=False)
-        st.download_button(
-            label="📥 Descargar datos de ciclo de vida en CSV",
-            data=csv_lifecycle,
-            file_name='fondos_ciclo_vida.csv',
-            mime='text/csv',
-        )
-    else:
-        st.info("No se encontraron fondos con los criterios de búsqueda especificados.")
 
-# Macro Analysis Tab
-with tab_list[4]:
+# Tab 3: Macro Analysis
+with tab_list[2]:
     st.markdown("### 🌍 Análisis del Ciclo Económico y Mortalidad de Fondos")
     
     if show_macro_analysis:
-        
-        # Load macro data
         macro_data = load_macro_data()
         sp500_data = load_sp500_data()
         
-        if not macro_data.empty or not sp500_data.empty:
-            # Create comprehensive market overview
-            st.markdown("### 📈 Vista Global: Mercados, Fondos y Ciclos Económicos")
+        if not sp500_data.empty or not macro_data.empty:
+            st.markdown("### 📈 Vista Global: Mercados y Fondos")
             
-            # Prepare monthly fund data
             monthly_fund_stats = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
             monthly_fund_stats = monthly_fund_stats.rename(columns={
                 'NUEVAS_INSCRIPCIONES': 'Altas',
@@ -923,26 +535,23 @@ with tab_list[4]:
             monthly_fund_stats = monthly_fund_stats.reset_index()
             monthly_fund_stats['date'] = pd.to_datetime(monthly_fund_stats[['year', 'month']].assign(day=1))
             
-            # Create sophisticated multi-layer visualization
             fig_overview = make_subplots(
                 rows=3, cols=1,
                 row_heights=[0.5, 0.25, 0.25],
                 vertical_spacing=0.05,
                 subplot_titles=(
-                    'S&P 500 y Fondos Españoles: La Historia Completa',
+                    'S&P 500 y Fondos Españoles',
                     'Flujo Neto de Fondos',
-                    'Tasa de Mortalidad vs Volatilidad (VIX)'
+                    'Tasa de Mortalidad'
                 ),
                 specs=[
                     [{"secondary_y": True}],
                     [{"secondary_y": False}],
-                    [{"secondary_y": True}]
+                    [{"secondary_y": False}]
                 ]
             )
             
-            # Panel 1: S&P 500 with fund births/deaths overlay
             if not sp500_data.empty:
-                # Add S&P 500 as area chart
                 fig_overview.add_trace(
                     go.Scatter(
                         x=sp500_data.index,
@@ -956,22 +565,7 @@ with tab_list[4]:
                     row=1, col=1,
                     secondary_y=False
                 )
-                
-                # Add moving averages
-                fig_overview.add_trace(
-                    go.Scatter(
-                        x=sp500_data.index,
-                        y=sp500_data['SP500_MA200'],
-                        name='MA 200',
-                        line=dict(color='#cbd5e1', width=1, dash='dash'),
-                        opacity=0.7,
-                        hovertemplate='<b>MA 200</b><br>%{y:,.0f}<extra></extra>'
-                    ),
-                    row=1, col=1,
-                    secondary_y=False
-                )
             
-            # Add fund births and deaths as bars on secondary y-axis
             fig_overview.add_trace(
                 go.Bar(
                     x=monthly_fund_stats['date'],
@@ -998,7 +592,6 @@ with tab_list[4]:
                 secondary_y=True
             )
             
-            # Panel 2: Net fund flow with color coding
             colors = ['#22c55e' if x >= 0 else '#dc2626' for x in monthly_fund_stats['Balance']]
             fig_overview.add_trace(
                 go.Bar(
@@ -1012,7 +605,6 @@ with tab_list[4]:
                 row=2, col=1
             )
             
-            # Panel 3: Mortality Rate vs VIX (if available)
             fig_overview.add_trace(
                 go.Scatter(
                     x=monthly_fund_stats['date'],
@@ -1021,29 +613,9 @@ with tab_list[4]:
                     line=dict(color='#dc2626', width=2),
                     hovertemplate='<b>Mortalidad</b><br>%{x|%Y-%m}<br>%{y:.1f}%<extra></extra>'
                 ),
-                row=3, col=1,
-                secondary_y=False
+                row=3, col=1
             )
             
-            if not macro_data.empty and 'VIX' in macro_data.columns:
-                # Aggregate VIX to monthly
-                vix_monthly = macro_data.groupby(['year', 'month'])['VIX'].mean().reset_index()
-                vix_monthly['date'] = pd.to_datetime(vix_monthly[['year', 'month']].assign(day=1))
-                
-                fig_overview.add_trace(
-                    go.Scatter(
-                        x=vix_monthly['date'],
-                        y=vix_monthly['VIX'],
-                        name='VIX',
-                        line=dict(color='#f59e0b', width=2),
-                        opacity=0.7,
-                        hovertemplate='<b>VIX</b><br>%{x|%Y-%m}<br>%{y:.1f}<extra></extra>'
-                    ),
-                    row=3, col=1,
-                    secondary_y=True
-                )
-            
-            # Add crisis period annotations
             crisis_periods = [
                 {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01", "color": "rgba(220, 38, 38, 0.1)"},
                 {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01", "color": "rgba(251, 191, 36, 0.1)"},
@@ -1063,28 +635,10 @@ with tab_list[4]:
                         row=row, col=1
                     )
             
-            # Update layout
-            fig_overview.update_xaxes(
-                gridcolor='#334155',
-                showgrid=False,
-                zeroline=False,
-                rangeslider_visible=False
-            )
-            
-            fig_overview.update_yaxes(
-                gridcolor='#334155',
-                showgrid=True,
-                zeroline=True,
-                zerolinecolor='#64748b',
-                zerolinewidth=1
-            )
-            
-            # Update y-axis titles
             fig_overview.update_yaxes(title_text="S&P 500 Index", row=1, col=1, secondary_y=False)
             fig_overview.update_yaxes(title_text="Número de Fondos", row=1, col=1, secondary_y=True)
             fig_overview.update_yaxes(title_text="Balance Neto", row=2, col=1)
-            fig_overview.update_yaxes(title_text="Mortalidad (%)", row=3, col=1, secondary_y=False)
-            fig_overview.update_yaxes(title_text="VIX", row=3, col=1, secondary_y=True)
+            fig_overview.update_yaxes(title_text="Mortalidad (%)", row=3, col=1)
             
             fig_overview.update_layout(
                 height=900,
@@ -1097,19 +651,13 @@ with tab_list[4]:
                     yanchor="top",
                     y=1.05,
                     xanchor="center",
-                    x=0.5,
-                    bgcolor='rgba(26, 31, 46, 0.8)',
-                    bordercolor='#334155',
-                    borderwidth=1
-                ),
-                margin=dict(t=100, b=50)
+                    x=0.5
+                )
             )
             
             st.plotly_chart(fig_overview, use_container_width=True)
             
-            # Key insights from the combined view
             if not sp500_data.empty:
-                # Calculate correlation between S&P 500 and fund mortality
                 sp500_monthly = sp500_data.groupby(['year', 'month'])['SP500_Returns'].mean().reset_index()
                 merged_for_corr = monthly_fund_stats.merge(
                     sp500_monthly,
@@ -1120,269 +668,26 @@ with tab_list[4]:
                 if len(merged_for_corr) > 10:
                     corr_sp500_mortality = merged_for_corr['Mortalidad'].corr(merged_for_corr['SP500_Returns'])
                     
-                    st.markdown("""
+                    st.markdown(f"""
                     <div class="info-box">
-                        <h4>📊 Insights del Análisis Integrado</h4>
+                        <h4>📊 Insights del Análisis</h4>
                         <ul style="line-height: 1.8;">
-                            <li>Correlación S&P 500 Returns vs Mortalidad: <strong>{:.3f}</strong></li>
-                            <li>Las crisis globales (áreas sombreadas) coinciden con picos de mortalidad</li>
-                            <li>La volatilidad (VIX) tiende a anticipar aumentos en liquidaciones</li>
+                            <li>Correlación S&P 500 Returns vs Mortalidad: <strong>{corr_sp500_mortality:.3f}</strong></li>
+                            <li>Las crisis globales coinciden con picos de mortalidad</li>
                             <li>Los mercados alcistas no garantizan supervivencia de fondos locales</li>
                         </ul>
                     </div>
-                    """.format(corr_sp500_mortality), unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            # Original macro analysis continues below
-            st.markdown("---")
-            
-
-                # Aggregate macro data to monthly
-                macro_monthly = macro_data.groupby(['year', 'month']).mean()
-                
-                # Merge fund and macro data
-                merged_data = monthly_fund_data_corr.merge(
-                    macro_monthly,
-                    on=['year', 'month'],
-                    how='inner'
-                )
-            
-            # Select macro indicator to display
-            available_indicators = [col for col in macro_monthly.columns if not col.startswith('year')]
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                selected_indicator = st.selectbox(
-                    "Seleccionar Indicador Macroeconómico",
-                    options=available_indicators,
-                    index=0 if available_indicators else None,
-                    format_func=lambda x: {
-                        'Spanish_10Y_Bond': 'Bono Español 10 años (%)',
-                        'Spain_GDP_Growth': 'Crecimiento PIB España (%)',
-                        'Spain_Unemployment': 'Desempleo España (%)',
-                        'EUR_USD': 'Tipo de Cambio EUR/USD',
-                        'VIX': 'Índice VIX (Volatilidad)',
-                        'US_10Y_Bond': 'Bono EEUU 10 años (%)',
-                        'Fed_Rate': 'Tipo Fed (%)'
-                    }.get(x, x)
-                )
-            
-            with col2:
-                correlation_metric = st.selectbox(
-                    "Correlacionar con",
-                    options=['Mortalidad', 'Bajas', 'Altas', 'Cambio_Neto'],
-                    index=0
-                )
-            
-            if selected_indicator and selected_indicator in merged_data.columns:
-                # Create dual-axis plot
-                fig_macro = go.Figure()
-                
-                # Add fund metric (left axis)
-                if correlation_metric == 'Cambio_Neto':
-                    merged_data['Cambio_Neto'] = merged_data['Altas'] - merged_data['Bajas']
-                
-                fig_macro.add_trace(go.Scatter(
-                    x=pd.to_datetime(merged_data[['year', 'month']].assign(day=1)),
-                    y=merged_data[correlation_metric],
-                    name=correlation_metric,
-                    line=dict(color='#dc2626', width=2),
-                    yaxis='y'
-                ))
-                
-                # Add macro indicator (right axis)
-                fig_macro.add_trace(go.Scatter(
-                    x=pd.to_datetime(merged_data[['year', 'month']].assign(day=1)),
-                    y=merged_data[selected_indicator],
-                    name=selected_indicator.replace('_', ' '),
-                    line=dict(color='#4338ca', width=2),
-                    yaxis='y2'
-                ))
-                
-                # Calculate correlation
-                correlation = merged_data[correlation_metric].corr(merged_data[selected_indicator])
-                
-                fig_macro.update_layout(
-                    title=f"{correlation_metric} vs {selected_indicator.replace('_', ' ')} (Correlación: {correlation:.3f})",
-                    xaxis_title="Fecha",
-                    yaxis=dict(
-                        title=correlation_metric,
-                        title_font=dict(color='#dc2626'),
-                        tickfont=dict(color='#dc2626')
-                    ),
-                    yaxis2=dict(
-                        title=selected_indicator.replace('_', ' '),
-                        title_font=dict(color='#4338ca'),
-                        tickfont=dict(color='#4338ca'),
-                        overlaying='y',
-                        side='right'
-                    ),
-                    height=500,
-                    plot_bgcolor='#1a1f2e',
-                    paper_bgcolor='#0e1117',
-                    font=dict(color='#cbd5e1'),
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5
-                    )
-                )
-                
-                fig_macro.update_xaxes(gridcolor='#334155', showgrid=False)
-                fig_macro.update_yaxes(gridcolor='#334155', showgrid=True)
-                
-                st.plotly_chart(fig_macro, use_container_width=True)
-                
-                # Correlation matrix
-                st.markdown("#### Matriz de Correlaciones")
-                
-                # Select relevant columns for correlation
-                correlation_cols = ['Altas', 'Bajas', 'Mortalidad'] + [col for col in available_indicators if col in merged_data.columns]
-                correlation_matrix = merged_data[correlation_cols].corr()
-                
-                # Create heatmap
-                fig_corr = go.Figure(data=go.Heatmap(
-                    z=correlation_matrix.values,
-                    x=correlation_matrix.columns,
-                    y=correlation_matrix.columns,
-                    colorscale='RdBu',
-                    zmid=0,
-                    text=correlation_matrix.values.round(2),
-                    texttemplate='%{text}',
-                    textfont={"size": 10},
-                    colorbar=dict(title="Correlación")
-                ))
-                
-                fig_corr.update_layout(
-                    title="Correlación entre Variables de Fondos e Indicadores Macro",
-                    height=500,
-                    plot_bgcolor='#1a1f2e',
-                    paper_bgcolor='#0e1117',
-                    font=dict(color='#cbd5e1')
-                )
-                
-                st.plotly_chart(fig_corr, use_container_width=True)
-                
-                # Key insights
-                st.markdown("#### 💡 Insights Clave")
-                
-                # Find strongest correlations
-                fund_cols = ['Altas', 'Bajas', 'Mortalidad']
-                macro_cols = [col for col in available_indicators if col in merged_data.columns]
-                
-                insights = []
-                for fund_col in fund_cols:
-                    for macro_col in macro_cols:
-                        if fund_col in correlation_matrix.columns and macro_col in correlation_matrix.columns:
-                            corr_value = correlation_matrix.loc[fund_col, macro_col]
-                            if abs(corr_value) > 0.3:  # Significant correlation threshold
-                                direction = "positiva" if corr_value > 0 else "negativa"
-                                insights.append(f"• **{fund_col}** tiene correlación {direction} ({corr_value:.2f}) con **{macro_col.replace('_', ' ')}**")
-                
-                if insights:
-                    st.markdown("""
-                    <div class="info-box">
-                        <h4>Correlaciones Significativas Detectadas:</h4>
-                        {}
-                    </div>
-                    """.format('\n'.join(insights)), unsafe_allow_html=True)
-                else:
-                    st.info("No se encontraron correlaciones significativas (>0.3) entre las variables de fondos y los indicadores macro.")
-                
-                # Economic cycles identification
-                st.markdown("#### 📊 Identificación de Ciclos Económicos")
-                
-                # Define economic periods based on known events
-                economic_periods = [
-                    {"name": "Burbuja Pre-Crisis", "start": "2005-01", "end": "2007-12", "color": "#22c55e"},
-                    {"name": "Crisis Financiera", "start": "2008-01", "end": "2012-12", "color": "#dc2626"},
-                    {"name": "Recuperación", "start": "2013-01", "end": "2019-12", "color": "#3b82f6"},
-                    {"name": "COVID-19", "start": "2020-01", "end": "2021-12", "color": "#f59e0b"},
-                    {"name": "Post-COVID", "start": "2022-01", "end": "2025-12", "color": "#8b5cf6"}
-                ]
-                
-                # Plot mortality rate with economic periods highlighted
-                fig_cycles = go.Figure()
-                
-                # Add mortality rate
-                fig_cycles.add_trace(go.Scatter(
-                    x=pd.to_datetime(merged_data[['year', 'month']].assign(day=1)),
-                    y=merged_data['Mortalidad'],
-                    name='Tasa de Mortalidad',
-                    line=dict(color='#dc2626', width=2)
-                ))
-                
-                # Add economic period backgrounds
-                for period in economic_periods:
-                    fig_cycles.add_vrect(
-                        x0=period["start"],
-                        x1=period["end"],
-                        fillcolor=period["color"],
-                        opacity=0.1,
-                        annotation_text=period["name"],
-                        annotation_position="top"
-                    )
-                
-                fig_cycles.update_layout(
-                    title="Tasa de Mortalidad de Fondos y Ciclos Económicos",
-                    xaxis_title="Fecha",
-                    yaxis_title="Tasa de Mortalidad (%)",
-                    height=400,
-                    plot_bgcolor='#1a1f2e',
-                    paper_bgcolor='#0e1117',
-                    font=dict(color='#cbd5e1'),
-                    showlegend=True
-                )
-                
-                fig_cycles.update_xaxes(gridcolor='#334155', showgrid=False)
-                fig_cycles.update_yaxes(gridcolor='#334155', showgrid=True)
-                
-                st.plotly_chart(fig_cycles, use_container_width=True)
-                
-            else:
-                st.warning("No hay suficientes datos para el indicador seleccionado.")
-        else:
-            st.warning("No se pudieron cargar los datos macroeconómicos. Verifica tu conexión a internet.")
+                    """, unsafe_allow_html=True)
     else:
         st.info("Active 'Mostrar análisis macro' en el panel lateral para ver el análisis del ciclo económico.")
-
-# Show raw data if selected
-if show_raw_data:
-    st.markdown("---")
-    st.markdown("## 📋 Datos Brutos")
-    
-    display_df = filtered_df[['date', 'year', 'month', 'status_esp', 'Nombre', 'N_Registro', 'Gestora', 'Depositaria']].copy()
-    display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
-    display_df = display_df.rename(columns={
-        'date': 'Fecha',
-        'year': 'Año',
-        'month': 'Mes',
-        'status_esp': 'Tipo',
-        'N_Registro': 'Nº Registro'
-    })
-    
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        height=600,
-        hide_index=True
-    )
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #64748b; padding: 1.5rem 0; font-size: 14px;">
     <p><strong>Análisis del Sesgo de Supervivencia en Fondos de Inversión Españoles</strong></p>
-    <p>Datos: CNMV (Comisión Nacional del Mercado de Valores) | Período: 2004-2025</p>
-    <p>Desarrollado por <a href="https://twitter.com/Gsnchez" target="_blank" style="color: #4338ca;">@Gsnchez</a> | 
+    <p>Datos: CNMV | Período: 2004-2025</p>
+    <p>Por <a href="https://twitter.com/Gsnchez" target="_blank" style="color: #4338ca;">@Gsnchez</a> | 
     <a href="https://bquantfinance.com" target="_blank" style="color: #4338ca;">bquantfinance.com</a></p>
-    <p style="font-size: 12px; margin-top: 1rem;">
-    Nota: Este análisis demuestra la importancia del sesgo de supervivencia en la evaluación de fondos de inversión. 
-    Los datos históricos que excluyen fondos liquidados pueden sobrestimar significativamente las rentabilidades esperadas.
-    </p>
 </div>
 """, unsafe_allow_html=True)
