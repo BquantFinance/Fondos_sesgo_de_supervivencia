@@ -4,25 +4,20 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+import re
 
-# Configuración de página
+# Page configuration
 st.set_page_config(
     page_title="Sesgo de Supervivencia - Fondos CNMV",
-    page_icon="📊",
+    page_icon="💀",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# CSS para dark mode con paleta elegante
+# Dark theme CSS
 st.markdown("""
 <style>
-    /* Dark mode palette */
     .stApp {
-        background-color: #0e1117;
-    }
-    
-    .main {
-        padding-top: 2rem;
         background-color: #0e1117;
     }
     
@@ -45,10 +40,6 @@ st.markdown("""
         color: #f1f5f9;
         font-size: 2rem;
         font-weight: 600;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-delta"] {
-        color: #64748b;
     }
     
     /* Headers */
@@ -74,51 +65,27 @@ st.markdown("""
         font-weight: 400;
     }
     
-    /* Sidebar styling */
-    .css-1d391kg {
-        background-color: #1e1e2e;
-    }
-    
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e1e2e 0%, #151521 100%);
-        border-right: 1px solid #334155;
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-        background-color: #1e1e2e;
-        padding: 0.5rem;
+    .alert-box {
+        background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%);
+        padding: 1.2rem;
         border-radius: 12px;
+        margin: 1.5rem 0;
+        color: #fef2f2;
+        text-align: center;
+        font-weight: 600;
+        font-size: 1.1rem;
+        box-shadow: 0 4px 6px rgba(220, 38, 38, 0.3);
     }
     
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding-left: 20px;
-        padding-right: 20px;
-        background-color: transparent;
+    .info-box {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border-left: 4px solid #6366f1;
+        padding: 1.2rem;
+        margin: 1.5rem 0;
         border-radius: 8px;
-        color: #94a3b8;
-        font-weight: 500;
+        color: #cbd5e1;
     }
     
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-    }
-    
-    /* DataFrame styling */
-    [data-testid="stDataFrame"] {
-        background: #1e1e2e;
-        border: 1px solid #334155;
-        border-radius: 8px;
-    }
-    
-    .dataframe {
-        font-size: 14px;
-    }
-    
-    /* Info boxes */
     .creator-box {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
         padding: 1rem;
@@ -134,615 +101,411 @@ st.markdown("""
         font-weight: 600;
     }
     
-    .creator-box a:hover {
-        text-decoration: underline;
-    }
-    
-    .info-box {
-        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-        border-left: 4px solid #6366f1;
-        padding: 1.2rem;
-        margin: 1.5rem 0;
-        border-radius: 8px;
-        color: #cbd5e1;
-    }
-    
-    .alert-box {
-        background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        color: #fef2f2;
-        text-align: center;
-        font-weight: 600;
-    }
-    
-    .success-box {
-        background: linear-gradient(135deg, #14532d 0%, #16a34a 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        color: #f0fdf4;
-        text-align: center;
-        font-weight: 600;
-    }
-    
-    /* Custom stats cards */
-    .stats-card {
-        background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-        padding: 1rem;
+    .crisis-period {
+        background: rgba(239, 68, 68, 0.1);
+        border: 2px solid rgba(239, 68, 68, 0.3);
         border-radius: 12px;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        margin: 0.5rem 0;
-        transition: transform 0.2s;
-    }
-    
-    .stats-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(99, 102, 241, 0.2);
-    }
-    
-    .highlight-period {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
-        border: 2px solid #6366f1;
-        border-radius: 12px;
-        padding: 1.5rem;
+        padding: 1rem;
         margin: 1rem 0;
-    }
-    
-    /* Select boxes and inputs */
-    .stSelectbox > div > div {
-        background-color: #1e293b;
-        border: 1px solid #475569;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Título y créditos
-st.markdown("<h1>🌙 Sesgo de Supervivencia en Fondos Españoles</h1>", unsafe_allow_html=True)
+# Title
+st.markdown("<h1>💀 Sesgo de Supervivencia en Fondos Españoles</h1>", unsafe_allow_html=True)
 st.markdown("""
 <div class="creator-box">
-    Creado por <a href="https://twitter.com/Gsnchez" target="_blank">@Gsnchez</a> | 
-    <a href="https://bquantfinance.com" target="_blank">bquantfinance.com</a>
+    Análisis del Sesgo de Supervivencia en la Industria de Fondos Española (CNMV) | 2004-2025
 </div>
 """, unsafe_allow_html=True)
 
-# Cargar datos
+# Load and process data
 @st.cache_data
-def load_data():
-    df_all = pd.read_excel('cnmv_fondos_20250828_172717.xlsx', sheet_name='Todos_Fondos')
-    df_births = pd.read_excel('cnmv_fondos_20250828_172717.xlsx', sheet_name='NUEVAS INSCRIPCIONES')
-    df_deaths = pd.read_excel('cnmv_fondos_20250828_172717.xlsx', sheet_name='BAJAS')
+def load_and_process_data():
+    df = pd.read_csv('cnmv_funds_data_RAW_final_multipage.csv')
     
-    for df in [df_all, df_births, df_deaths]:
-        df['Fecha_Parsed'] = pd.to_datetime(df['Fecha_Parsed'])
-        df['Year_Month'] = df['Fecha_Parsed'].dt.to_period('M')
+    # Extract date from filename
+    def extract_date_from_filename(filename):
+        match = re.search(r'(\d{2})-(\d{2})-(\d{4})_al_(\d{2})-(\d{2})-(\d{4})', filename)
+        if match:
+            # Use end date of bulletin period
+            end_date = pd.to_datetime(f"{match.group(6)}-{match.group(5)}-{match.group(4)}", format='%Y-%m-%d')
+            return end_date
+        return None
     
-    return df_all, df_births, df_deaths
-
-df_all, df_births, df_deaths = load_data()
-
-# ============= SIDEBAR PARA FILTROS =============
-st.sidebar.markdown("## 🎯 Seleccionar Período")
-
-# Obtener años disponibles
-years = sorted(df_all['Año'].unique())
-year_options = ["Todos los años"] + [str(year) for year in years]
-selected_year = st.sidebar.selectbox(
-    "📅 **Año**",
-    year_options,
-    index=0  # "Todos los años" por defecto
-)
-
-month_names = {
-    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-}
-
-# Solo mostrar selector de mes si se selecciona un año específico
-if selected_year != "Todos los años":
-    selected_year_num = int(selected_year)
-    # Obtener meses para el año seleccionado
-    months_in_year = sorted(df_all[df_all['Año'] == selected_year_num]['Mes'].unique())
+    # Add date columns
+    df['date'] = df['file'].apply(extract_date_from_filename)
+    df = df.dropna(subset=['date'])
+    df['year'] = df['date'].dt.year
+    df['month'] = df['date'].dt.month
+    df['year_month'] = df['date'].dt.to_period('M')
     
-    selected_month = st.sidebar.selectbox(
-        "📆 **Mes**",
-        ["Todo el año"] + [month_names.get(m, str(m)) for m in months_in_year],
-        index=0
-    )
-    
-    # Convertir mes seleccionado a número
-    if selected_month != "Todo el año":
-        month_num = [k for k, v in month_names.items() if v == selected_month][0] if selected_month in month_names.values() else int(selected_month)
-    else:
-        month_num = None
-else:
-    selected_year_num = None
-    month_num = None
-    selected_month = None
+    return df
 
-# Filtrar datos según selección
-if selected_year == "Todos los años":
-    period_births = df_births
-    period_deaths = df_deaths
-    period_mergers = df_all[df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN']
-    period_label = "Todos los años (2004-2025)"
-elif month_num:
-    period_births = df_births[(df_births['Año'] == selected_year_num) & (df_births['Mes'] == month_num)]
-    period_deaths = df_deaths[(df_deaths['Año'] == selected_year_num) & (df_deaths['Mes'] == month_num)]
-    period_mergers = df_all[(df_all['Año'] == selected_year_num) & (df_all['Mes'] == month_num) & 
-                            (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')]
-    period_label = f"{selected_month} {selected_year}"
-else:
-    period_births = df_births[df_births['Año'] == selected_year_num]
-    period_deaths = df_deaths[df_deaths['Año'] == selected_year_num]
-    period_mergers = df_all[(df_all['Año'] == selected_year_num) & 
-                            (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')]
-    period_label = f"Año {selected_year}"
+df = load_and_process_data()
 
-# Calcular estadísticas
-births_count = len(period_births)
-deaths_count = len(period_deaths)
-mergers_count = len(period_mergers)
-net_change = births_count - deaths_count - mergers_count
+# Calculate key metrics
+births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
+deaths = df[df['status'] == 'BAJAS']
 
-# Opciones de visualización en sidebar
-st.sidebar.markdown("---")
-st.sidebar.markdown("## 📊 Opciones de Visualización")
-show_full_analysis = st.sidebar.checkbox("Mostrar análisis completo", value=True)
-show_historical = st.sidebar.checkbox("Mostrar evolución histórica", value=True)
+total_births = len(births)
+total_deaths = len(deaths)
+mortality_rate = (total_deaths / total_births * 100) if total_births > 0 else 0
+net_change = total_births - total_deaths
 
-# ============= SECCIÓN PRINCIPAL: FONDOS DEL PERÍODO =============
-st.markdown(f'<div class="highlight-period"><h2 style="margin-top:0;">📋 Fondos del Período: {period_label}</h2></div>', unsafe_allow_html=True)
+# KEY INSIGHT: Survivorship Bias Alert
+st.markdown(f"""
+<div class="alert-box">
+    ⚠️ EVIDENCIA CRÍTICA DE SESGO DE SUPERVIVENCIA ⚠️<br>
+    Mortalidad: {mortality_rate:.1f}% | Más fondos mueren que nacen | {abs(net_change):,} fondos desaparecidos netos
+</div>
+""", unsafe_allow_html=True)
 
-# Métricas del período en la parte superior
+# Top metrics
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric(
-        label="🌱 Altas",
-        value=f"{births_count}",
-        delta="Nuevos fondos"
+        label="🌱 Total Altas",
+        value=f"{total_births:,}",
+        delta="Fondos creados"
     )
 
 with col2:
     st.metric(
-        label="💀 Bajas",
-        value=f"{deaths_count}",
+        label="💀 Total Bajas",
+        value=f"{total_deaths:,}",
         delta="Fondos liquidados"
     )
 
 with col3:
     st.metric(
-        label="🔄 Fusiones",
-        value=f"{mergers_count}",
-        delta="Fondos fusionados"
+        label="📉 Tasa Mortalidad",
+        value=f"{mortality_rate:.1f}%",
+        delta="Bajas/Altas"
     )
 
 with col4:
     st.metric(
-        label="📈 Cambio Neto",
-        value=f"{net_change:+}",
-        delta="Balance del período",
-        delta_color="normal" if net_change >= 0 else "inverse"
+        label="⚰️ Saldo Neto",
+        value=f"{net_change:,}",
+        delta="Déficit total",
+        delta_color="inverse"
     )
 
-# Tabs para mostrar los fondos
-tab1, tab2, tab3 = st.tabs(["🌱 **Altas**", "💀 **Bajas**", "🔄 **Fusiones**"])
+# Prepare yearly data
+yearly_stats = df.groupby(['year', 'status']).size().unstack(fill_value=0)
+yearly_stats = yearly_stats.rename(columns={
+    'NUEVAS_INSCRIPCIONES': 'Altas',
+    'BAJAS': 'Bajas'
+})
+yearly_stats['Cambio_Neto'] = yearly_stats['Altas'] - yearly_stats['Bajas']
+yearly_stats['Tasa_Mortalidad_Anual'] = (yearly_stats['Bajas'] / yearly_stats['Altas'] * 100).round(1)
+yearly_stats = yearly_stats.reset_index()
 
-with tab1:
-    if len(period_births) > 0:
-        st.markdown(f"<div class='stats-card'><strong>{len(period_births)}</strong> nuevos fondos registrados en {period_label}</div>", unsafe_allow_html=True)
-        
-        # Preparar datos para mostrar
-        if selected_year == "Todos los años":
-            display_births = period_births[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
-            display_births = display_births.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Alta',
-                'Año': 'Año'
-            })
-            display_births = display_births.sort_values(['Año', 'Fecha Alta'], ascending=[False, False])
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Alta": st.column_config.DateColumn("Fecha Alta", format="DD/MM/YYYY", width="small"),
-                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
-            }
-        else:
-            display_births = period_births[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-            display_births = display_births.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Alta'
-            })
-            display_births = display_births.sort_values('Fecha Alta', ascending=False)
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Alta": st.column_config.DateColumn("Fecha Alta", format="DD/MM/YYYY", width="small")
-            }
-        
-        # Mostrar DataFrame con estilo
-        st.dataframe(
-            display_births,
-            use_container_width=True,
-            height=400,
-            hide_index=True,
-            column_config=column_config
-        )
-    else:
-        st.info(f"📭 No hay altas registradas en {period_label}")
+# VISUALIZATION 1: Historical Evolution
+st.markdown("## 📊 Evolución Histórica: La Cruda Realidad")
 
-with tab2:
-    if len(period_deaths) > 0:
-        st.markdown(f"<div class='stats-card'><strong>{len(period_deaths)}</strong> fondos liquidados en {period_label}</div>", unsafe_allow_html=True)
-        
-        if selected_year == "Todos los años":
-            display_deaths = period_deaths[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
-            display_deaths = display_deaths.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Baja',
-                'Año': 'Año'
-            })
-            display_deaths = display_deaths.sort_values(['Año', 'Fecha Baja'], ascending=[False, False])
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Baja": st.column_config.DateColumn("Fecha Baja", format="DD/MM/YYYY", width="small"),
-                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
-            }
-        else:
-            display_deaths = period_deaths[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-            display_deaths = display_deaths.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Baja'
-            })
-            display_deaths = display_deaths.sort_values('Fecha Baja', ascending=False)
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Baja": st.column_config.DateColumn("Fecha Baja", format="DD/MM/YYYY", width="small")
-            }
-        
-        st.dataframe(
-            display_deaths,
-            use_container_width=True,
-            height=400,
-            hide_index=True,
-            column_config=column_config
-        )
-    else:
-        st.info(f"📭 No hay bajas registradas en {period_label}")
+fig1 = go.Figure()
 
-with tab3:
-    if len(period_mergers) > 0:
-        st.markdown(f"<div class='stats-card'><strong>{len(period_mergers)}</strong> fondos fusionados en {period_label}</div>", unsafe_allow_html=True)
-        
-        if selected_year == "Todos los años":
-            display_mergers = period_mergers[['Denominacion', 'Nº_Registro', 'Fecha', 'Año']].copy()
-            display_mergers = display_mergers.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Fusión',
-                'Año': 'Año'
-            })
-            display_mergers = display_mergers.sort_values(['Año', 'Fecha Fusión'], ascending=[False, False])
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Fusión": st.column_config.DateColumn("Fecha Fusión", format="DD/MM/YYYY", width="small"),
-                "Año": st.column_config.NumberColumn("Año", format="%d", width="small")
-            }
-        else:
-            display_mergers = period_mergers[['Denominacion', 'Nº_Registro', 'Fecha']].copy()
-            display_mergers = display_mergers.rename(columns={
-                'Denominacion': 'Nombre del Fondo',
-                'Nº_Registro': 'Nº Registro',
-                'Fecha': 'Fecha Fusión'
-            })
-            display_mergers = display_mergers.sort_values('Fecha Fusión', ascending=False)
-            
-            column_config = {
-                "Nombre del Fondo": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Nº Registro": st.column_config.TextColumn("Nº Registro", width="small"),
-                "Fecha Fusión": st.column_config.DateColumn("Fecha Fusión", format="DD/MM/YYYY", width="small")
-            }
-        
-        st.dataframe(
-            display_mergers,
-            use_container_width=True,
-            height=400,
-            hide_index=True,
-            column_config=column_config
-        )
-    else:
-        st.info(f"📭 No hay fusiones registradas en {period_label}")
+# Add births (positive)
+fig1.add_trace(go.Bar(
+    x=yearly_stats['year'],
+    y=yearly_stats['Altas'],
+    name='Altas (Nacimientos)',
+    marker_color='#10b981',
+    text=yearly_stats['Altas'],
+    textposition='outside',
+    hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
+))
 
-# ============= ANÁLISIS DETALLADO (si está activado) =============
-if show_full_analysis:
-    if selected_year == "Todos los años":
-        # Resumen por años cuando se seleccionan todos
-        st.markdown("## 📊 Resumen por Año")
-        
-        # Crear tabla resumen
-        yearly_summary = []
-        for year in sorted(years):
-            year_births = len(df_births[df_births['Año'] == year])
-            year_deaths = len(df_deaths[df_deaths['Año'] == year])
-            year_mergers = len(df_all[(df_all['Año'] == year) & (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')])
-            year_net = year_births - year_deaths - year_mergers
-            
-            yearly_summary.append({
-                'Año': year,
-                '🌱 Altas': year_births,
-                '💀 Bajas': year_deaths,
-                '🔄 Fusiones': year_mergers,
-                '📈 Cambio Neto': year_net
-            })
-        
-        summary_df = pd.DataFrame(yearly_summary)
-        summary_df = summary_df.sort_values('Año', ascending=False)
-        
-        # Mostrar tabla con formato
-        st.dataframe(
-            summary_df,
-            use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "Año": st.column_config.NumberColumn("Año", format="%d"),
-                "🌱 Altas": st.column_config.NumberColumn("🌱 Altas", format="%d"),
-                "💀 Bajas": st.column_config.NumberColumn("💀 Bajas", format="%d"),
-                "🔄 Fusiones": st.column_config.NumberColumn("🔄 Fusiones", format="%d"),
-                "📈 Cambio Neto": st.column_config.NumberColumn(
-                    "📈 Cambio Neto",
-                    format="%d",
-                    help="Altas - Bajas - Fusiones"
-                )
-            }
-        )
-        
-    elif selected_year != "Todos los años":
-        # Detalle mensual del año seleccionado (solo si hay un año específico)
-        st.markdown(f"## 📅 Distribución Mensual - {selected_year}")
-        # Datos mensuales para el año seleccionado
-        monthly_births = df_births[df_births['Año'] == selected_year_num].groupby('Mes').size().reset_index(name='Altas')
-        monthly_deaths = df_deaths[df_deaths['Año'] == selected_year_num].groupby('Mes').size().reset_index(name='Bajas')
-        monthly_mergers = df_all[(df_all['Año'] == selected_year_num) & 
-                                 (df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN')].groupby('Mes').size().reset_index(name='Fusiones')
-        
-        # Merge mensual
-        monthly_data = pd.DataFrame({'Mes': range(1, 13)})
-        monthly_data = pd.merge(monthly_data, monthly_births, on='Mes', how='left')
-        monthly_data = pd.merge(monthly_data, monthly_deaths, on='Mes', how='left')
-        monthly_data = pd.merge(monthly_data, monthly_mergers, on='Mes', how='left')
-        monthly_data = monthly_data.fillna(0)
-        monthly_data['Mes_Nombre'] = monthly_data['Mes'].map(month_names)
-        monthly_data['Cambio_Neto'] = monthly_data['Altas'] - monthly_data['Bajas'] - monthly_data['Fusiones']
-        
-        # Gráfico mensual
-        fig_monthly = go.Figure()
-        
-        fig_monthly.add_trace(go.Bar(
-            x=monthly_data['Mes_Nombre'],
-            y=monthly_data['Altas'],
-            name='Altas',
-            marker_color='#10b981',
-            text=monthly_data['Altas'].astype(int),
-            textposition='auto',
-            hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
-        ))
-        
-        fig_monthly.add_trace(go.Bar(
-            x=monthly_data['Mes_Nombre'],
-            y=monthly_data['Bajas'],
-            name='Bajas',
-            marker_color='#ef4444',
-            text=monthly_data['Bajas'].astype(int),
-            textposition='auto',
-            hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
-        ))
-        
-        fig_monthly.add_trace(go.Bar(
-            x=monthly_data['Mes_Nombre'],
-            y=monthly_data['Fusiones'],
-            name='Fusiones',
-            marker_color='#f59e0b',
-            text=monthly_data['Fusiones'].astype(int),
-            textposition='auto',
-            hovertemplate='<b>%{x}</b><br>Fusiones: %{y}<extra></extra>'
-        ))
-        
-        # Resaltar mes seleccionado si aplica
-        if month_num:
-            month_idx = month_num - 1
-            fig_monthly.add_vrect(
-                x0=month_idx - 0.4,
-                x1=month_idx + 0.4,
-                fillcolor="#6366f1",
-                opacity=0.2,
-                line_width=2,
-                line_color="#6366f1",
-            )
-        
-        fig_monthly.update_layout(
-            xaxis_title="",
-            yaxis_title="Número de Fondos",
-            height=400,
-            plot_bgcolor='#1e1e2e',
-            paper_bgcolor='#0e1117',
-            font=dict(color='#cbd5e1'),
-            barmode='group',
-            hovermode='x unified',
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5
-            )
-        )
-        
-        fig_monthly.update_xaxes(gridcolor='#334155', showgrid=False)
-        fig_monthly.update_yaxes(gridcolor='#334155', showgrid=True)
-        
-        st.plotly_chart(fig_monthly, use_container_width=True)
+# Add deaths (negative)
+fig1.add_trace(go.Bar(
+    x=yearly_stats['year'],
+    y=-yearly_stats['Bajas'],
+    name='Bajas (Muertes)',
+    marker_color='#ef4444',
+    text=yearly_stats['Bajas'],
+    textposition='outside',
+    hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
+))
 
-# ============= EVOLUCIÓN HISTÓRICA (si está activada) =============
-if show_historical:
-    st.markdown("## 📈 Evolución Histórica Completa")
-    
-    # Preparar datos anuales
-    yearly_births = df_births.groupby('Año').size().reset_index(name='Altas')
-    yearly_deaths = df_deaths.groupby('Año').size().reset_index(name='Bajas')
-    yearly_mergers = df_all[df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN'].groupby('Año').size().reset_index(name='Fusiones')
-    
-    yearly_data = pd.merge(yearly_births, yearly_deaths, on='Año', how='outer')
-    yearly_data = pd.merge(yearly_data, yearly_mergers, on='Año', how='outer')
-    yearly_data = yearly_data.fillna(0).sort_values('Año')
-    
-    # Crear gráfico
-    fig = go.Figure()
-    
-    # Altas (positivo)
-    fig.add_trace(go.Bar(
-        x=yearly_data['Año'],
-        y=yearly_data['Altas'],
-        name='Altas',
-        marker_color='#10b981',
-        opacity=0.9,
-        hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
-    ))
-    
-    # Bajas (negativo)
-    fig.add_trace(go.Bar(
-        x=yearly_data['Año'],
-        y=-yearly_data['Bajas'],
-        name='Bajas',
-        marker_color='#ef4444',
-        opacity=0.9,
-        hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
-    ))
-    
-    # Fusiones (negativo)
-    fig.add_trace(go.Bar(
-        x=yearly_data['Año'],
-        y=-yearly_data['Fusiones'],
-        name='Fusiones',
-        marker_color='#f59e0b',
-        opacity=0.9,
-        hovertemplate='<b>%{x}</b><br>Fusiones: %{y}<extra></extra>'
-    ))
-    
-    # Línea de cambio neto
-    yearly_data['Cambio_Neto'] = yearly_data['Altas'] - yearly_data['Bajas'] - yearly_data['Fusiones']
-    fig.add_trace(go.Scatter(
-        x=yearly_data['Año'],
-        y=yearly_data['Cambio_Neto'],
-        name='Cambio Neto',
-        line=dict(color='#8b5cf6', width=3),
-        mode='lines+markers',
-        marker=dict(size=8),
-        hovertemplate='<b>%{x}</b><br>Cambio Neto: %{y:+}<extra></extra>'
-    ))
-    
-    # Resaltar año seleccionado (solo si es un año específico)
-    if selected_year != "Todos los años":
-        fig.add_vrect(
-            x0=selected_year_num - 0.5,
-            x1=selected_year_num + 0.5,
-            fillcolor="#6366f1",
-            opacity=0.1,
-            line_width=0,
-            annotation_text=f"{selected_year}",
-            annotation_position="top"
-        )
-    
-    fig.update_layout(
-        title="Altas vs Bajas de Fondos (2004-2025)",
-        xaxis_title="Año",
-        yaxis_title="Número de Fondos",
-        hovermode='x unified',
-        height=500,
-        plot_bgcolor='#1e1e2e',
-        paper_bgcolor='#0e1117',
-        font=dict(color='#cbd5e1', family='Arial, sans-serif'),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="center",
-            x=0.5
-        ),
-        barmode='relative'
+# Add net change line
+fig1.add_trace(go.Scatter(
+    x=yearly_stats['year'],
+    y=yearly_stats['Cambio_Neto'],
+    name='Cambio Neto',
+    line=dict(color='#fbbf24', width=3),
+    mode='lines+markers',
+    marker=dict(size=10),
+    hovertemplate='<b>%{x}</b><br>Cambio Neto: %{y:+}<extra></extra>'
+))
+
+# Highlight crisis period (2009-2015)
+fig1.add_vrect(
+    x0=2008.5, x1=2015.5,
+    fillcolor="red", opacity=0.1,
+    annotation_text="CRISIS<br>FINANCIERA",
+    annotation_position="top"
+)
+
+fig1.update_layout(
+    title="Nacimientos vs Muertes de Fondos: El Cementerio Crece",
+    xaxis_title="Año",
+    yaxis_title="Número de Fondos",
+    hovermode='x unified',
+    height=500,
+    plot_bgcolor='#1e1e2e',
+    paper_bgcolor='#0e1117',
+    font=dict(color='#cbd5e1'),
+    barmode='relative',
+    showlegend=True,
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="center",
+        x=0.5
     )
-    
-    fig.update_xaxes(gridcolor='#334155', showgrid=True, zeroline=False)
-    fig.update_yaxes(gridcolor='#334155', showgrid=True, zeroline=True, zerolinecolor='#64748b')
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Estadísticas acumuladas
-    st.markdown("## 💎 Evidencia del Sesgo de Supervivencia")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    total_births = len(df_births)
-    total_deaths = len(df_deaths)
-    total_mergers = df_all[df_all['Tipo_Operacion'] == 'FUSIÓN DE FONDOS DE INVERSIÓN'].shape[0]
-    exit_rate = ((total_deaths + total_mergers) / total_births * 100)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="info-box">
-            <h3>📊 Totales Históricos</h3>
-            <p>• Total Altas: <strong>{total_births:,}</strong></p>
-            <p>• Total Bajas: <strong>{total_deaths:,}</strong></p>
-            <p>• Total Fusiones: <strong>{total_mergers:,}</strong></p>
-            <p>• Período: <strong>2004-2025</strong></p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class="info-box">
-            <h3>💀 Tasas de Salida</h3>
-            <p>• Tasa de Mortalidad: <strong>{(total_deaths/total_births*100):.1f}%</strong></p>
-            <p>• Tasa de Fusión: <strong>{(total_mergers/total_births*100):.1f}%</strong></p>
-            <p>• <span style="color: #ef4444;">Tasa Total de Salida: <strong>{exit_rate:.1f}%</strong></span></p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="info-box">
-            <h3>⚠️ Implicaciones</h3>
-            <p>• Retornos <strong>sobrestimados</strong></p>
-            <p>• Riesgo <strong>subestimado</strong></p>
-            <p>• Bases de datos <strong>incompletas</strong></p>
-            <p>• Performance <strong>sesgada</strong></p>
-        </div>
-        """, unsafe_allow_html=True)
+)
+
+fig1.add_hline(y=0, line_color="#64748b", line_width=2)
+fig1.update_xaxes(gridcolor='#334155', showgrid=False)
+fig1.update_yaxes(gridcolor='#334155', showgrid=True)
+
+st.plotly_chart(fig1, use_container_width=True)
+
+# VISUALIZATION 2: Mortality Rate Evolution
+st.markdown("## 💀 Tasa de Mortalidad Anual")
+
+fig2 = go.Figure()
+
+# Calculate colors based on mortality rate
+colors = ['#ef4444' if rate > 100 else '#f59e0b' if rate > 50 else '#10b981' 
+          for rate in yearly_stats['Tasa_Mortalidad_Anual']]
+
+fig2.add_trace(go.Bar(
+    x=yearly_stats['year'],
+    y=yearly_stats['Tasa_Mortalidad_Anual'],
+    marker_color=colors,
+    text=[f"{rate:.0f}%" for rate in yearly_stats['Tasa_Mortalidad_Anual']],
+    textposition='outside',
+    hovertemplate='<b>%{x}</b><br>Tasa Mortalidad: %{y:.1f}%<extra></extra>'
+))
+
+fig2.add_hline(y=100, line_color="#ef4444", line_width=2, line_dash="dash",
+               annotation_text="100% = Más muertes que nacimientos")
+
+fig2.update_layout(
+    title="Tasa de Mortalidad: Años de Masacre (>100% = Más Muertes que Nacimientos)",
+    xaxis_title="Año",
+    yaxis_title="Tasa de Mortalidad (%)",
+    height=400,
+    plot_bgcolor='#1e1e2e',
+    paper_bgcolor='#0e1117',
+    font=dict(color='#cbd5e1'),
+    showlegend=False
+)
+
+fig2.update_xaxes(gridcolor='#334155', showgrid=False)
+fig2.update_yaxes(gridcolor='#334155', showgrid=True)
+
+st.plotly_chart(fig2, use_container_width=True)
+
+# Crisis Period Analysis
+st.markdown("## 🔥 Análisis del Período de Crisis (2009-2015)")
+
+crisis_data = yearly_stats[(yearly_stats['year'] >= 2009) & (yearly_stats['year'] <= 2015)]
+crisis_births = crisis_data['Altas'].sum()
+crisis_deaths = crisis_data['Bajas'].sum()
+crisis_net = crisis_births - crisis_deaths
+crisis_mortality = (crisis_deaths / crisis_births * 100) if crisis_births > 0 else 0
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown(f"""
+    <div class="crisis-period">
+        <h3>📊 Período Crisis</h3>
+        <p>• Altas: <strong>{crisis_births:,}</strong></p>
+        <p>• Bajas: <strong>{crisis_deaths:,}</strong></p>
+        <p>• Balance: <strong style="color: #ef4444;">{crisis_net:,}</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"""
+    <div class="crisis-period">
+        <h3>💀 Tasa Mortalidad Crisis</h3>
+        <p style="font-size: 2rem; color: #ef4444;"><strong>{crisis_mortality:.0f}%</strong></p>
+        <p>Casi 2 muertes por cada nacimiento</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+    <div class="crisis-period">
+        <h3>⚠️ Impacto</h3>
+        <p>• <strong>{abs(crisis_net):,}</strong> fondos desaparecidos</p>
+        <p>• 7 años consecutivos negativos</p>
+        <p>• Sesgo extremo en datos históricos</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# VISUALIZATION 3: Cumulative Impact
+st.markdown("## 📈 Impacto Acumulado: El Sesgo se Agrava")
+
+yearly_stats['Cumulative_Net'] = yearly_stats['Cambio_Neto'].cumsum()
+
+fig3 = go.Figure()
+
+fig3.add_trace(go.Scatter(
+    x=yearly_stats['year'],
+    y=yearly_stats['Cumulative_Net'],
+    mode='lines+markers',
+    fill='tozeroy',
+    fillcolor='rgba(239, 68, 68, 0.2)',
+    line=dict(color='#ef4444', width=3),
+    marker=dict(size=8),
+    text=[f"{val:+,}" for val in yearly_stats['Cumulative_Net']],
+    textposition='top center',
+    hovertemplate='<b>%{x}</b><br>Déficit Acumulado: %{y:,}<extra></extra>'
+))
+
+fig3.add_hline(y=0, line_color="#64748b", line_width=1, line_dash="dash")
+
+fig3.update_layout(
+    title="Déficit Acumulado de Fondos: La Brecha que Crece",
+    xaxis_title="Año",
+    yaxis_title="Cambio Neto Acumulado",
+    height=400,
+    plot_bgcolor='#1e1e2e',
+    paper_bgcolor='#0e1117',
+    font=dict(color='#cbd5e1'),
+    showlegend=False
+)
+
+fig3.update_xaxes(gridcolor='#334155', showgrid=False)
+fig3.update_yaxes(gridcolor='#334155', showgrid=True)
+
+st.plotly_chart(fig3, use_container_width=True)
+
+# Top Management Companies Analysis
+st.markdown("## 🏢 Gestoras con Mayor Actividad")
+
+# Births by management company
+births_by_gestora = births.dropna(subset=['Gestora']).groupby('Gestora').size().reset_index(name='Altas')
+top_gestoras_births = births_by_gestora.nlargest(15, 'Altas')
+
+fig4 = go.Figure()
+
+fig4.add_trace(go.Bar(
+    y=top_gestoras_births['Gestora'],
+    x=top_gestoras_births['Altas'],
+    orientation='h',
+    marker_color='#10b981',
+    text=top_gestoras_births['Altas'],
+    textposition='outside',
+    hovertemplate='<b>%{y}</b><br>Nuevos Fondos: %{x}<extra></extra>'
+))
+
+fig4.update_layout(
+    title="Top 15 Gestoras por Creación de Fondos",
+    xaxis_title="Número de Fondos Creados",
+    yaxis_title="",
+    height=500,
+    plot_bgcolor='#1e1e2e',
+    paper_bgcolor='#0e1117',
+    font=dict(color='#cbd5e1'),
+    showlegend=False,
+    margin=dict(l=300)
+)
+
+fig4.update_xaxes(gridcolor='#334155', showgrid=True)
+fig4.update_yaxes(gridcolor='#334155', showgrid=False)
+
+st.plotly_chart(fig4, use_container_width=True)
+
+# Key Implications
+st.markdown("## ⚠️ Implicaciones del Sesgo de Supervivencia")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("""
+    <div class="info-box">
+        <h3>📊 Impacto en Análisis de Rentabilidad</h3>
+        <ul style="line-height: 1.8;">
+            <li>✓ Los fondos que fracasan <strong>desaparecen de las bases de datos</strong></li>
+            <li>✓ Solo sobreviven los fondos con mejor performance</li>
+            <li>✓ Las rentabilidades históricas están <strong>infladas artificialmente</strong></li>
+            <li>✓ El riesgo real está <strong>sistemáticamente subestimado</strong></li>
+            <li>✓ Con 143% de mortalidad, el sesgo es <strong>EXTREMO</strong></li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown("""
+    <div class="info-box">
+        <h3>🎯 Para el Inversor</h3>
+        <ul style="line-height: 1.8;">
+            <li>⚠️ <strong>No confíes en rentabilidades históricas promedio</strong></li>
+            <li>⚠️ El riesgo de pérdida es mayor al publicado</li>
+            <li>⚠️ Muchos fondos "ganadores" de hoy serán los muertos de mañana</li>
+            <li>⚠️ La selección activa de fondos tiene alta probabilidad de fracaso</li>
+            <li>⚠️ Considera alternativas de inversión pasiva e indexada</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Summary Statistics Table
+st.markdown("## 📋 Resumen Estadístico Completo")
+
+# Create summary by year with additional metrics
+summary_data = []
+for year in yearly_stats['year']:
+    year_data = yearly_stats[yearly_stats['year'] == year].iloc[0]
+    summary_data.append({
+        'Año': int(year),
+        'Altas': int(year_data['Altas']),
+        'Bajas': int(year_data['Bajas']),
+        'Cambio Neto': int(year_data['Cambio_Neto']),
+        'Tasa Mortalidad (%)': f"{year_data['Tasa_Mortalidad_Anual']:.0f}%",
+        'Acumulado': int(year_data['Cumulative_Net'])
+    })
+
+summary_df = pd.DataFrame(summary_data)
+
+# Style the dataframe
+def style_negative(val):
+    if isinstance(val, str):
+        return ''
+    return 'color: #ef4444' if val < 0 else 'color: #10b981'
+
+styled_df = summary_df.style.applymap(style_negative, subset=['Cambio Neto', 'Acumulado'])
+
+st.dataframe(
+    summary_df,
+    use_container_width=True,
+    height=400,
+    hide_index=True,
+    column_config={
+        "Año": st.column_config.NumberColumn("Año", format="%d"),
+        "Altas": st.column_config.NumberColumn("Altas", format="%d"),
+        "Bajas": st.column_config.NumberColumn("Bajas", format="%d"),
+        "Cambio Neto": st.column_config.NumberColumn("Cambio Neto", format="%d"),
+        "Tasa Mortalidad (%)": st.column_config.TextColumn("Mortalidad"),
+        "Acumulado": st.column_config.NumberColumn("Déficit Acum.", format="%d")
+    }
+)
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #64748b; padding: 2rem 0;">
     <p>📊 Datos: CNMV (Comisión Nacional del Mercado de Valores) | 📅 Período: 2004-2025</p>
-    <p>
-        Desarrollado por <a href="https://twitter.com/Gsnchez" target="_blank" style="color: #8b5cf6;">@Gsnchez</a> | 
-        <a href="https://bquantfinance.com" target="_blank" style="color: #8b5cf6;">bquantfinance.com</a>
-    </p>
+    <p>⚠️ Este análisis demuestra el severo sesgo de supervivencia en la industria de fondos española</p>
+    <p>💀 Más de 3,600 fondos han desaparecido, distorsionando las estadísticas de rentabilidad</p>
 </div>
 """, unsafe_allow_html=True)
