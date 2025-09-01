@@ -5,12 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
 import re
-try:
-    import pandas_datareader as pdr
-    FRED_AVAILABLE = True
-except ImportError:
-    FRED_AVAILABLE = False
-    st.warning("pandas_datareader not installed. Macro analysis will be limited.")
+import pandas_datareader as pdr
 
 # Page configuration
 st.set_page_config(
