@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 import re
 import pandas_datareader.data as wb
+import yfinance as yf
 
 # Page configuration
 st.set_page_config(
