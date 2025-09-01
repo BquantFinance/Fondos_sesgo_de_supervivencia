@@ -1,7 +1,3 @@
-# Original analysis: Correlation with specific indicators
-            st.markdown("### 🔗 Análisis de Correlación Detallado")
-            
-            if not macro_data.empty:import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1141,35 +1137,16 @@ with tab_list[4]:
             # Original macro analysis continues below
             st.markdown("---")
             
-            # Original analysis: Correlation with specific indicators
-            st.markdown("### 🔗 Análisis de Correlación Detallado")
-            
-            if not macro_data.empty:
-                # Prepare fund data by year-month for correlation (reuse from above if possible)
-                if 'monthly_fund_data' not in locals():
-                    monthly_fund_data = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
-                    monthly_fund_data = monthly_fund_data.rename(columns={
-                        'NUEVAS_INSCRIPCIONES': 'Altas',
-                        'BAJAS': 'Bajas'
-                    })
-                    monthly_fund_data['Mortalidad'] = (monthly_fund_data['Bajas'] / monthly_fund_data['Altas'] * 100).fillna(0)
-                    monthly_fund_data = monthly_fund_data.reset_index()
-            monthly_fund_data = monthly_fund_data.rename(columns={
-                'NUEVAS_INSCRIPCIONES': 'Altas',
-                'BAJAS': 'Bajas'
-            })
-            monthly_fund_data['Mortalidad'] = (monthly_fund_data['Bajas'] / monthly_fund_data['Altas'] * 100).fillna(0)
-            monthly_fund_data = monthly_fund_data.reset_index()
-            
-            # Aggregate macro data to monthly
-            macro_monthly = macro_data.groupby(['year', 'month']).mean()
-            
-            # Merge fund and macro data
-            merged_data = monthly_fund_data.merge(
-                macro_monthly,
-                on=['year', 'month'],
-                how='inner'
-            )
+
+                # Aggregate macro data to monthly
+                macro_monthly = macro_data.groupby(['year', 'month']).mean()
+                
+                # Merge fund and macro data
+                merged_data = monthly_fund_data_corr.merge(
+                    macro_monthly,
+                    on=['year', 'month'],
+                    how='inner'
+                )
             
             # Select macro indicator to display
             available_indicators = [col for col in macro_monthly.columns if not col.startswith('year')]
