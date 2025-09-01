@@ -366,10 +366,7 @@ yearly_stats['Tasa_Mortalidad'] = (yearly_stats['Bajas'] / yearly_stats['Altas']
 yearly_stats = yearly_stats.reset_index()
 
 # Tabs for different views
-tabs = ["📈 **Análisis Temporal**", "📋 **Datos Transaccionales**", "🏢 **Análisis por Gestoras**", "🔍 **Búsqueda de Fondos**"]
-if show_macro_analysis and FRED_AVAILABLE:
-    tabs.append("🌍 **Análisis Macro**")
-
+tabs = ["📈 **Análisis Temporal**", "📋 **Datos Transaccionales**", "🏢 **Análisis por Gestoras**", "🔍 **Búsqueda de Fondos**", "🌍 **Análisis Macro**"]
 tab_list = st.tabs(tabs)
 
 with tab_list[0]:
