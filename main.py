@@ -183,16 +183,25 @@ net_change = total_births - total_deaths
 st.sidebar.markdown("## 🔍 Filtros de Análisis")
 st.sidebar.markdown("---")
 
-# Year filter
+# Year filter with "Todos los años" option
 years_available = sorted(df['year'].unique())
-selected_years = st.sidebar.multiselect(
-    "Seleccionar Años",
-    options=years_available,
-    default=years_available,
-    help="Seleccione uno o varios años para analizar"
+year_filter_type = st.sidebar.radio(
+    "Filtro de Años",
+    options=['Todos los años', 'Selección personalizada'],
+    index=0
 )
 
-# Month filter
+if year_filter_type == 'Todos los años':
+    selected_years = years_available
+else:
+    selected_years = st.sidebar.multiselect(
+        "Seleccionar Años",
+        options=years_available,
+        default=years_available,
+        help="Seleccione uno o varios años para analizar"
+    )
+
+# Month filter with "Todos los meses" option
 months_order = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 months_esp = {
@@ -201,13 +210,21 @@ months_esp = {
     'September': 'Septiembre', 'October': 'Octubre', 'November': 'Noviembre', 'December': 'Diciembre'
 }
 
-months_available = [months_esp.get(m, m) for m in sorted(df['month_name'].unique())]
-selected_months = st.sidebar.multiselect(
-    "Seleccionar Meses",
-    options=months_order,
-    default=months_order,
-    help="Seleccione uno o varios meses"
+month_filter_type = st.sidebar.radio(
+    "Filtro de Meses",
+    options=['Todos los meses', 'Selección personalizada'],
+    index=0
 )
+
+if month_filter_type == 'Todos los meses':
+    selected_months = months_order
+else:
+    selected_months = st.sidebar.multiselect(
+        "Seleccionar Meses",
+        options=months_order,
+        default=months_order,
+        help="Seleccione uno o varios meses"
+    )
 
 # Status filter
 status_filter = st.sidebar.radio(
@@ -236,6 +253,15 @@ show_raw_data = st.sidebar.checkbox("Mostrar datos brutos", value=False)
 
 # Main metrics
 st.markdown("## 📊 Resumen General del Período Completo")
+
+# Show active filters
+if year_filter_type != 'Todos los años' or month_filter_type != 'Todos los meses':
+    filter_text = []
+    if year_filter_type != 'Todos los años':
+        filter_text.append(f"Años: {', '.join(map(str, selected_years))}")
+    if month_filter_type != 'Todos los meses':
+        filter_text.append(f"Meses: {', '.join(selected_months)}")
+    st.info(f"**Filtros activos:** {' | '.join(filter_text)}")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -454,12 +480,15 @@ with tab2:
         # Apply year filter
         monthly_data = monthly_data[monthly_data['year'].isin(selected_years)]
         
-        # Reorder columns
-        monthly_data = monthly_data[['Año', 'Mes', 'Altas', 'Bajas', 'Cambio_Neto', 'Tasa_Mortalidad_%']]
+        # Store month number for sorting before reordering columns
+        monthly_data['month_num'] = monthly_data['month']
+        
+        # Reorder columns for display
+        display_monthly = monthly_data[['Año', 'Mes', 'Altas', 'Bajas', 'Cambio_Neto', 'Tasa_Mortalidad_%', 'month_num']].copy()
         
         # Display summary by year
         st.markdown("#### Resumen Anual")
-        yearly_summary = monthly_data.groupby('Año').agg({
+        yearly_summary = display_monthly.groupby('Año').agg({
             'Altas': 'sum',
             'Bajas': 'sum',
             'Cambio_Neto': 'sum'
@@ -482,12 +511,13 @@ with tab2:
         # Display monthly detail
         st.markdown("#### Detalle Mensual")
         
-        # Sort by year and month
-        monthly_data = monthly_data.sort_values(['Año', 'month'], ascending=[False, True])
-        monthly_data = monthly_data.drop('month', axis=1, errors='ignore')
+        # Sort by year (descending) and month (ascending)
+        display_monthly = display_monthly.sort_values(['Año', 'month_num'], ascending=[False, True])
+        # Remove the month_num column before displaying
+        display_monthly = display_monthly.drop('month_num', axis=1)
         
         st.dataframe(
-            monthly_data,
+            display_monthly,
             use_container_width=True,
             height=600,
             hide_index=True,
@@ -502,7 +532,7 @@ with tab2:
         )
         
         # Download button for the data
-        csv = monthly_data.to_csv(index=False)
+        csv = display_monthly.to_csv(index=False)
         st.download_button(
             label="📥 Descargar datos en CSV",
             data=csv,
