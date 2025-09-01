@@ -6,3 +6,4 @@ plotly
 seaborn
 openpyxl
 pandas_datareader
+yfinance
