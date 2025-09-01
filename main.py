@@ -622,18 +622,30 @@ with tab_list[2]:
                 {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01", "color": "rgba(139, 92, 246, 0.1)"}
             ]
             
+            # Add crisis periods as shapes instead of vrects for better subplot compatibility
             for period in crisis_periods:
-                for row in [1, 2, 3]:
-                    fig_overview.add_vrect(
-                        x0=period["start"],
-                        x1=period["end"],
-                        fillcolor=period["color"],
-                        layer="below",
-                        line_width=0,
-                        annotation_text=period["name"] if row == 1 else None,
-                        annotation_position="top",
-                        row=row, col=1
-                    )
+                fig_overview.add_shape(
+                    type="rect",
+                    xref="x",
+                    yref="paper",
+                    x0=period["start"],
+                    x1=period["end"],
+                    y0=0,
+                    y1=1,
+                    fillcolor=period["color"],
+                    layer="below",
+                    line_width=0,
+                    row=1, col=1
+                )
+                
+                fig_overview.add_annotation(
+                    x=period["start"],
+                    y=1,
+                    yref="paper",
+                    text=period["name"],
+                    showarrow=False,
+                    row=1, col=1
+                )
             
             fig_overview.update_yaxes(title_text="S&P 500 Index", row=1, col=1, secondary_y=False)
             fig_overview.update_yaxes(title_text="Número de Fondos", row=1, col=1, secondary_y=True)
@@ -655,7 +667,7 @@ with tab_list[2]:
                 )
             )
             
-            st.plotly_chart(fig_overview, use_container_width=True)
+            st.plotly_chart(fig_overview, key="overview_chart", use_container_width=True)
             
             if not sp500_data.empty:
                 sp500_monthly = sp500_data.groupby(['year', 'month'])['SP500_Returns'].mean().reset_index()
