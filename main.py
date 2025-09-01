@@ -173,9 +173,6 @@ def load_and_process_data():
 @st.cache_data
 def load_macro_data():
     """Load macroeconomic data from FRED"""
-    if not FRED_AVAILABLE:
-        return pd.DataFrame()
-    
     try:
         start_date = '2004-01-01'
         end_date = '2025-12-31'
@@ -195,7 +192,7 @@ def load_macro_data():
         
         for fred_code, name in indicators.items():
             try:
-                series = pdr.get_data_fred(fred_code, start=start_date, end=end_date)
+                series = wb.DataReader(fred_code, 'fred', start_date, end_date)
                 series.columns = [name]
                 if macro_data.empty:
                     macro_data = series
@@ -205,7 +202,7 @@ def load_macro_data():
                 continue
         
         # Forward fill missing values
-        macro_data = macro_data.fillna(method='ffill')
+        macro_data = macro_data.ffill()
         
         # Add year and month columns
         macro_data['year'] = macro_data.index.year
@@ -293,7 +290,6 @@ if status_filter == 'Solo Altas':
 elif status_filter == 'Solo Bajas':
     filtered_df = filtered_df[filtered_df['status'] == 'BAJAS']
 
-# Display options
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 📈 Opciones de Visualización")
 show_monthly_detail = st.sidebar.checkbox("Mostrar detalle mensual", value=True)
@@ -366,9 +362,7 @@ yearly_stats['Tasa_Mortalidad'] = (yearly_stats['Bajas'] / yearly_stats['Altas']
 yearly_stats = yearly_stats.reset_index()
 
 # Tabs for different views
-tabs = ["📈 **Análisis Temporal**", "📋 **Datos Transaccionales**", "🏢 **Análisis por Gestoras**", "🔍 **Búsqueda de Fondos**"]
-if show_macro_analysis and FRED_AVAILABLE:
-    tabs.append("🌍 **Análisis Macro**")
+tabs = ["📈 **Análisis Temporal**", "📋 **Datos Transaccionales**", "🏢 **Análisis por Gestoras**", "🔍 **Búsqueda de Fondos**", "🌍 **Análisis Macro**"]
 
 tab_list = st.tabs(tabs)
 
@@ -878,10 +872,11 @@ with tab_list[3]:
     else:
         st.info("No se encontraron fondos con los criterios de búsqueda especificados.")
 
-# Macro Analysis Tab (if enabled and available)
-if show_macro_analysis and FRED_AVAILABLE and len(tabs) > 4:
-    with tab_list[4]:
-        st.markdown("### 🌍 Análisis del Ciclo Económico y Mortalidad de Fondos")
+# Macro Analysis Tab
+with tab_list[4]:
+    st.markdown("### 🌍 Análisis del Ciclo Económico y Mortalidad de Fondos")
+    
+    if show_macro_analysis:
         
         # Load macro data
         macro_data = load_macro_data()
@@ -1104,7 +1099,9 @@ if show_macro_analysis and FRED_AVAILABLE and len(tabs) > 4:
             else:
                 st.warning("No hay suficientes datos para el indicador seleccionado.")
         else:
-            st.warning("No se pudieron cargar los datos macroeconómicos. Verifica tu conexión a internet o instala pandas_datareader.")
+            st.warning("No se pudieron cargar los datos macroeconómicos. Verifica tu conexión a internet.")
+    else:
+        st.info("Active 'Mostrar análisis macro' en el panel lateral para ver el análisis del ciclo económico.")
 
 # Show raw data if selected
 if show_raw_data:
