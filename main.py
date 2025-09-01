@@ -307,7 +307,7 @@ st.markdown("""
 # Load and process data
 @st.cache_data
 def load_and_process_data():
-    df = pd.read_csv('cnmv_funds_data_RAW_final_multipage.csv')
+    df = pd.read_csv('cnmv_funds_data_FINAL.csv')
     
     def extract_date_from_filename(filename):
         match = re.search(r'(\d{2})-(\d{2})-(\d{4})_al_(\d{2})-(\d{2})-(\d{4})', filename)
