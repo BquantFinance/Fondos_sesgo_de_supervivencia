@@ -401,21 +401,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Data Quality Alert
-if quality_report['invalid_dates'] > 0 or quality_report['too_long_life'] > 0:
-    st.markdown(f"""
-    <div class="data-quality-box">
-        <h4>⚠️ Limpieza de Datos Aplicada</h4>
-        <p>Se han detectado y eliminado registros con datos incorrectos:</p>
-        <ul style="margin-left: 1rem;">
-            <li><strong>{quality_report['invalid_dates']}</strong> registros con vida negativa (fecha baja anterior a fecha alta)</li>
-            <li><strong>{quality_report['too_long_life']}</strong> registros con vida superior a 50 años (probables errores)</li>
-            <li><strong>{quality_report['zero_life']}</strong> registros con vida de 0 días</li>
-        </ul>
-        <p>Total de registros válidos: <strong>{quality_report['final_count']}</strong> de {quality_report['initial_count']} originales</p>
-    </div>
-    """, unsafe_allow_html=True)
-
 # Newsletter banner
 st.markdown("""
 <div style='background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;'>
