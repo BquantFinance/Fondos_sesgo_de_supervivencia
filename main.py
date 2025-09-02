@@ -430,7 +430,7 @@ with col4:
 tabs = ["🔍 **Búsqueda de Fondos**", "📈 **Ciclo Económico**", "📊 **Análisis Temporal**"]
 tab_list = st.tabs(tabs)
 
-# Tab 1: Fund Search (PRIMARY)
+# Tab 1: Fund Search (ENHANCED VERSION)
 with tab_list[0]:
     st.markdown("### Búsqueda y Ciclo de Vida de Fondos")
     
@@ -452,27 +452,74 @@ with tab_list[0]:
     fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
     fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
     fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
+    fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
+    fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
     
-    # Search interface
-    col1, col2 = st.columns([3, 1])
+    # Enhanced search interface with multiple filters
+    st.markdown("#### 🔍 Filtros de Búsqueda")
+    
+    # First row of filters
+    col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
         search_term = st.text_input(
-            "",
-            placeholder="🔍 Buscar por nombre o número de registro...",
-            help="Ej: CAIXASABADELL o 3043"
+            "Buscar por Nombre o Nº Registro",
+            placeholder="Ej: CAIXASABADELL o 3043...",
+            help="Búsqueda por nombre del fondo o número de registro"
         )
     
     with col2:
         status_search = st.selectbox(
-            "",
+            "Estado",
             options=['Todos', 'Activos', 'Liquidados'],
             index=0
         )
     
-    # Apply filters
+    with col3:
+        # Get unique years for filter
+        all_years = sorted(list(set(fund_lifecycle['Año_Alta'].dropna().astype(int).tolist() + 
+                                  fund_lifecycle['Año_Baja'].dropna().astype(int).tolist())))
+        
+        year_range = st.select_slider(
+            "Rango de Años",
+            options=all_years,
+            value=(min(all_years), max(all_years)),
+            help="Filtra fondos activos en este período"
+        )
+    
+    # Second row of filters
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        # Get unique Gestoras
+        gestoras = ['Todas'] + sorted(fund_lifecycle['Gestora'].dropna().unique().tolist())
+        selected_gestora = st.selectbox(
+            "Gestora",
+            options=gestoras,
+            index=0
+        )
+    
+    with col2:
+        # Get unique Depositarias
+        depositarias = ['Todas'] + sorted(fund_lifecycle['Depositaria'].dropna().unique().tolist())
+        selected_depositaria = st.selectbox(
+            "Depositaria",
+            options=depositarias,
+            index=0
+        )
+    
+    with col3:
+        vida_filter = st.select_slider(
+            "Vida del Fondo (años)",
+            options=['Todos', '< 1', '1-3', '3-5', '5-10', '> 10'],
+            value='Todos',
+            help="Filtra por duración de vida (solo liquidados)"
+        )
+    
+    # Apply all filters
     filtered_lifecycle = fund_lifecycle.copy()
     
+    # Text search filter
     if search_term:
         mask = (
             filtered_lifecycle['Nombre'].str.contains(search_term.upper(), case=False, na=False) |
@@ -480,17 +527,60 @@ with tab_list[0]:
         )
         filtered_lifecycle = filtered_lifecycle[mask]
     
+    # Status filter
     if status_search == 'Activos':
         filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].isna()]
     elif status_search == 'Liquidados':
         filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()]
     
-    # Statistics
+    # Year range filter
+    mask = (
+        (filtered_lifecycle['Año_Alta'] >= year_range[0]) & 
+        (filtered_lifecycle['Año_Alta'] <= year_range[1])
+    ) | (
+        (filtered_lifecycle['Año_Baja'] >= year_range[0]) & 
+        (filtered_lifecycle['Año_Baja'] <= year_range[1])
+    )
+    filtered_lifecycle = filtered_lifecycle[mask]
+    
+    # Gestora filter
+    if selected_gestora != 'Todas':
+        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Gestora'] == selected_gestora]
+    
+    # Depositaria filter
+    if selected_depositaria != 'Todas':
+        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Depositaria'] == selected_depositaria]
+    
+    # Life duration filter
+    if vida_filter != 'Todos' and 'Vida_Anos' in filtered_lifecycle.columns:
+        if vida_filter == '< 1':
+            filtered_lifecycle = filtered_lifecycle[
+                (filtered_lifecycle['Vida_Anos'] < 1) & filtered_lifecycle['Vida_Anos'].notna()
+            ]
+        elif vida_filter == '1-3':
+            filtered_lifecycle = filtered_lifecycle[
+                (filtered_lifecycle['Vida_Anos'] >= 1) & (filtered_lifecycle['Vida_Anos'] < 3)
+            ]
+        elif vida_filter == '3-5':
+            filtered_lifecycle = filtered_lifecycle[
+                (filtered_lifecycle['Vida_Anos'] >= 3) & (filtered_lifecycle['Vida_Anos'] < 5)
+            ]
+        elif vida_filter == '5-10':
+            filtered_lifecycle = filtered_lifecycle[
+                (filtered_lifecycle['Vida_Anos'] >= 5) & (filtered_lifecycle['Vida_Anos'] < 10)
+            ]
+        elif vida_filter == '> 10':
+            filtered_lifecycle = filtered_lifecycle[
+                filtered_lifecycle['Vida_Anos'] >= 10
+            ]
+    
+    # Statistics summary
     total_in_search = len(filtered_lifecycle)
     active_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].isna()])
     liquidated_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()])
     
-    col1, col2, col3 = st.columns(3)
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric("Total Fondos", f"{total_in_search:,}")
@@ -503,8 +593,14 @@ with tab_list[0]:
         st.metric("Liquidados", f"{liquidated_in_search:,}",
                   delta=f"{(liquidated_in_search/total_in_search*100):.1f}%" if total_in_search > 0 else "0%")
     
-    # Display results
+    with col4:
+        avg_vida = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]['Vida_Anos'].mean()
+        st.metric("Vida Media", f"{avg_vida:.1f} años" if not pd.isna(avg_vida) else "N/A")
+    
+    # Display ALL results in table (no height limit for full scrolling)
     if total_in_search > 0:
+        st.markdown(f"#### 📋 Resultados ({total_in_search:,} fondos encontrados)")
+        
         display_lifecycle = filtered_lifecycle.copy()
         display_lifecycle['N_Registro'] = display_lifecycle['N_Registro'].astype(int)
         display_lifecycle = display_lifecycle.sort_values('Fecha_Alta', ascending=False)
@@ -514,10 +610,10 @@ with tab_list[0]:
         
         display_cols = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos', 'Estado_Actual', 'Gestora', 'Depositaria']
         
+        # Show ALL results without height restriction
         st.dataframe(
             display_lifecycle[display_cols],
             use_container_width=True,
-            height=500,
             hide_index=True,
             column_config={
                 "N_Registro": st.column_config.NumberColumn("Nº Registro", width="small"),
@@ -530,8 +626,226 @@ with tab_list[0]:
                 "Depositaria": st.column_config.TextColumn("Depositaria", width="medium")
             }
         )
+        
+        # INSIGHTFUL STATISTICS SECTION
+        st.markdown("---")
+        st.markdown("### 📊 Estadísticas Detalladas")
+        
+        # Create tabs for different statistics
+        stat_tabs = st.tabs(["🏢 Por Gestora", "🏦 Por Depositaria", "📅 Por Años", "⚰️ Análisis de Mortalidad"])
+        
+        # Tab 1: Statistics by Gestora
+        with stat_tabs[0]:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Top Gestoras by number of funds
+                top_gestoras = filtered_lifecycle.groupby('Gestora').agg({
+                    'N_Registro': 'count',
+                    'Estado_Actual': lambda x: (x == '✅ Activo').sum(),
+                    'Vida_Anos': 'mean'
+                }).round(1)
+                top_gestoras.columns = ['Total_Fondos', 'Activos', 'Vida_Media']
+                top_gestoras['Liquidados'] = top_gestoras['Total_Fondos'] - top_gestoras['Activos']
+                top_gestoras['Tasa_Mortalidad'] = (top_gestoras['Liquidados'] / top_gestoras['Total_Fondos'] * 100).round(1)
+                top_gestoras = top_gestoras.sort_values('Total_Fondos', ascending=False).head(10)
+                
+                st.markdown("**🏆 Top 10 Gestoras por Número de Fondos**")
+                st.dataframe(
+                    top_gestoras,
+                    use_container_width=True,
+                    column_config={
+                        "Total_Fondos": st.column_config.NumberColumn("Total", format="%d"),
+                        "Activos": st.column_config.NumberColumn("Activos", format="%d"),
+                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
+                        "Vida_Media": st.column_config.NumberColumn("Vida Media (años)", format="%.1f"),
+                        "Tasa_Mortalidad": st.column_config.NumberColumn("Mortalidad %", format="%.1f%%")
+                    }
+                )
+            
+            with col2:
+                # Gestoras with highest mortality
+                mortality_gestoras = filtered_lifecycle[filtered_lifecycle['Gestora'].notna()].groupby('Gestora').agg({
+                    'N_Registro': 'count',
+                    'Estado_Actual': lambda x: (x == '💀 Liquidado').sum()
+                })
+                mortality_gestoras.columns = ['Total', 'Liquidados']
+                mortality_gestoras = mortality_gestoras[mortality_gestoras['Total'] >= 5]  # At least 5 funds
+                mortality_gestoras['Tasa_Mortalidad'] = (mortality_gestoras['Liquidados'] / mortality_gestoras['Total'] * 100).round(1)
+                mortality_gestoras = mortality_gestoras.sort_values('Tasa_Mortalidad', ascending=False).head(10)
+                
+                st.markdown("**💀 Gestoras con Mayor Tasa de Mortalidad** *(mín. 5 fondos)*")
+                st.dataframe(
+                    mortality_gestoras,
+                    use_container_width=True,
+                    column_config={
+                        "Total": st.column_config.NumberColumn("Total Fondos", format="%d"),
+                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
+                        "Tasa_Mortalidad": st.column_config.ProgressColumn(
+                            "Mortalidad %",
+                            format="%.1f%%",
+                            min_value=0,
+                            max_value=100
+                        )
+                    }
+                )
+        
+        # Tab 2: Statistics by Depositaria
+        with stat_tabs[1]:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Top Depositarias
+                top_depositarias = filtered_lifecycle.groupby('Depositaria').agg({
+                    'N_Registro': 'count',
+                    'Estado_Actual': lambda x: (x == '✅ Activo').sum(),
+                    'Vida_Anos': 'mean'
+                }).round(1)
+                top_depositarias.columns = ['Total_Fondos', 'Activos', 'Vida_Media']
+                top_depositarias['Liquidados'] = top_depositarias['Total_Fondos'] - top_depositarias['Activos']
+                top_depositarias = top_depositarias.sort_values('Total_Fondos', ascending=False).head(10)
+                
+                st.markdown("**🏆 Top 10 Depositarias por Número de Fondos**")
+                st.dataframe(
+                    top_depositarias,
+                    use_container_width=True,
+                    column_config={
+                        "Total_Fondos": st.column_config.NumberColumn("Total", format="%d"),
+                        "Activos": st.column_config.NumberColumn("Activos", format="%d"),
+                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
+                        "Vida_Media": st.column_config.NumberColumn("Vida Media (años)", format="%.1f")
+                    }
+                )
+            
+            with col2:
+                # Market concentration
+                total_funds = len(filtered_lifecycle)
+                top5_depositarias = filtered_lifecycle.groupby('Depositaria')['N_Registro'].count().nlargest(5)
+                concentration = (top5_depositarias.sum() / total_funds * 100)
+                
+                st.markdown("**📊 Concentración del Mercado**")
+                st.metric("Top 5 Depositarias", f"{concentration:.1f}%", "del total de fondos")
+                
+                # Show concentration breakdown
+                concentration_data = pd.DataFrame({
+                    'Depositaria': top5_depositarias.index,
+                    'Fondos': top5_depositarias.values,
+                    'Porcentaje': (top5_depositarias.values / total_funds * 100).round(1)
+                })
+                st.dataframe(concentration_data, use_container_width=True, hide_index=True)
+        
+        # Tab 3: Statistics by Years
+        with stat_tabs[2]:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Funds by year of creation
+                yearly_creation = filtered_lifecycle.groupby('Año_Alta').agg({
+                    'N_Registro': 'count',
+                    'Estado_Actual': lambda x: (x == '✅ Activo').sum()
+                })
+                yearly_creation.columns = ['Creados', 'Aún_Activos']
+                yearly_creation['Supervivencia_%'] = (yearly_creation['Aún_Activos'] / yearly_creation['Creados'] * 100).round(1)
+                yearly_creation = yearly_creation.sort_index(ascending=False).head(10)
+                
+                st.markdown("**📅 Fondos por Año de Creación** *(últimos 10 años)*")
+                st.dataframe(
+                    yearly_creation,
+                    use_container_width=True,
+                    column_config={
+                        "Creados": st.column_config.NumberColumn("Creados", format="%d"),
+                        "Aún_Activos": st.column_config.NumberColumn("Aún Activos", format="%d"),
+                        "Supervivencia_%": st.column_config.ProgressColumn(
+                            "Supervivencia %",
+                            format="%.1f%%",
+                            min_value=0,
+                            max_value=100
+                        )
+                    }
+                )
+            
+            with col2:
+                # Funds by year of closure
+                yearly_closure = filtered_lifecycle[filtered_lifecycle['Año_Baja'].notna()].groupby('Año_Baja')['N_Registro'].count()
+                yearly_closure = yearly_closure.sort_index(ascending=False).head(10)
+                
+                st.markdown("**⚰️ Liquidaciones por Año** *(últimos 10 años)*")
+                yearly_closure_df = pd.DataFrame({
+                    'Año': yearly_closure.index.astype(int),
+                    'Liquidaciones': yearly_closure.values
+                })
+                
+                # Add crisis indicator
+                crisis_years = [2008, 2009, 2010, 2011, 2012, 2020]
+                yearly_closure_df['Crisis'] = yearly_closure_df['Año'].apply(
+                    lambda x: '🔴 Sí' if x in crisis_years else '🟢 No'
+                )
+                
+                st.dataframe(
+                    yearly_closure_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Año": st.column_config.NumberColumn("Año", format="%d"),
+                        "Liquidaciones": st.column_config.NumberColumn("Liquidaciones", format="%d"),
+                        "Crisis": st.column_config.TextColumn("Período Crisis")
+                    }
+                )
+        
+        # Tab 4: Mortality Analysis
+        with stat_tabs[3]:
+            col1, col2, col3 = st.columns(3)
+            
+            # Life duration distribution
+            liquidated_funds = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]
+            
+            with col1:
+                st.markdown("**⏱️ Distribución de Vida de Fondos Liquidados**")
+                life_bins = pd.cut(liquidated_funds['Vida_Anos'], 
+                                 bins=[0, 1, 3, 5, 10, 100],
+                                 labels=['< 1 año', '1-3 años', '3-5 años', '5-10 años', '> 10 años'])
+                life_dist = life_bins.value_counts().sort_index()
+                
+                life_dist_df = pd.DataFrame({
+                    'Duración': life_dist.index,
+                    'Fondos': life_dist.values,
+                    'Porcentaje': (life_dist.values / life_dist.sum() * 100).round(1)
+                })
+                st.dataframe(life_dist_df, use_container_width=True, hide_index=True)
+            
+            with col2:
+                st.markdown("**📈 Estadísticas de Supervivencia**")
+                
+                # Calculate survival stats
+                median_life = liquidated_funds['Vida_Anos'].median()
+                q1_life = liquidated_funds['Vida_Anos'].quantile(0.25)
+                q3_life = liquidated_funds['Vida_Anos'].quantile(0.75)
+                
+                st.metric("Mediana de Vida", f"{median_life:.1f} años")
+                st.metric("25% mueren antes de", f"{q1_life:.1f} años")
+                st.metric("75% mueren antes de", f"{q3_life:.1f} años")
+            
+            with col3:
+                st.markdown("**💡 Insights Clave**")
+                
+                # Calculate key insights
+                infant_mortality = len(liquidated_funds[liquidated_funds['Vida_Anos'] < 1]) / len(liquidated_funds) * 100
+                long_survivors = len(filtered_lifecycle[
+                    (filtered_lifecycle['Vida_Anos'] > 10) | 
+                    ((filtered_lifecycle['Fecha_Baja'].isna()) & 
+                     ((pd.Timestamp.now() - filtered_lifecycle['Fecha_Alta']).dt.days / 365.25 > 10))
+                ]) / len(filtered_lifecycle) * 100
+                
+                st.info(f"""
+                **Mortalidad Infantil:** {infant_mortality:.1f}% de los fondos liquidados mueren en su primer año
+                
+                **Supervivientes a Largo Plazo:** Solo {long_survivors:.1f}% de los fondos superan los 10 años
+                
+                **Tasa de Mortalidad Global:** {(liquidated_in_search/total_in_search*100):.1f}% en la selección actual
+                """)
+    
     else:
-        st.info("No se encontraron fondos con los criterios especificados")
+        st.info("No se encontraron fondos con los criterios especificados. Prueba a ajustar los filtros.")
 
 # Tab 2: Economic Cycle Analysis
 with tab_list[1]:
