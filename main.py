@@ -337,7 +337,7 @@ st.markdown("""
     Datos CNMV 2004-2025
 </div>
 """, unsafe_allow_html=True)
-
+# Newsletter Banner - Fixed version
 st.markdown("""
 <div style="background: rgba(99, 102, 241, 0.1); 
             border: 1px solid rgba(99, 102, 241, 0.3);
@@ -369,9 +369,7 @@ st.markdown("""
               text-decoration: none; 
               font-weight: 500;
               font-size: 0.95rem;
-              transition: opacity 0.3s ease;"
-       onmouseover="this.style.opacity='0.9';"
-       onmouseout="this.style.opacity='1';">
+              transition: all 0.3s ease;">
         Suscribirse →
     </a>
     
