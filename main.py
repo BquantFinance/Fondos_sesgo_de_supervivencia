@@ -337,51 +337,16 @@ st.markdown("""
     Datos CNMV 2004-2025
 </div>
 """, unsafe_allow_html=True)
-# Newsletter Banner - Alternative with CSS hover
+
+# Simplified HTML newsletter banner
 st.markdown("""
-<style>
-.newsletter-btn:hover {
-    opacity: 0.9 !important;
-    transform: translateY(-2px);
-}
-</style>
-<div style="background: rgba(99, 102, 241, 0.1); 
-            border: 1px solid rgba(99, 102, 241, 0.3);
-            padding: 1rem 1.5rem; 
-            border-radius: 12px; 
-            margin: 1.5rem 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 1rem;">
-    
-    <div style="display: flex; align-items: center; gap: 1rem;">
-        <span style="font-size: 1.5rem;">📬</span>
-        <div>
-            <strong style="color: #a5b4fc;">BQuant Fund Lab Newsletter</strong>
-            <span style="color: #94a3b8; margin-left: 0.5rem;">
-                • Análisis cuantitativo semanal de fondos
-            </span>
-        </div>
-    </div>
-    
-    <a href="https://bquantfundlab.substack.com/" 
-       target="_blank" 
-       class="newsletter-btn"
-       style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); 
-              color: white; 
-              padding: 0.5rem 1.25rem; 
-              border-radius: 8px; 
-              text-decoration: none; 
-              font-weight: 500;
-              font-size: 0.95rem;
-              transition: all 0.3s ease;">
-        Suscribirse →
-    </a>
-    
+<div style='background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;'>
+    <h3 style='color: #a5b4fc; margin: 0 0 10px 0;'>📬 BQuant Fund Lab Newsletter</h3>
+    <p style='color: #94a3b8; margin: 0 0 15px 0;'>Análisis cuantitativo semanal de fondos</p>
+    <a href='https://bquantfundlab.substack.com/' target='_blank' style='background: #6366f1; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; display: inline-block;'>Suscribirse →</a>
 </div>
 """, unsafe_allow_html=True)
+
 # Key metrics at top
 col1, col2, col3, col4 = st.columns(4)
 
