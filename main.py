@@ -6,8 +6,8 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import numpy as np
 import re
-import yfinance as yf
-import pandas_datareader.data as wb
+import warnings
+warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Dark mode aesthetic CSS
+# Dark mode aesthetic CSS (keeping the same styles)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -238,6 +238,15 @@ st.markdown("""
         color: #fca5a5;
     }
     
+    .data-quality-box {
+        background: rgba(251, 191, 36, 0.1);
+        border-left: 4px solid #fbbf24;
+        padding: 1rem 1.5rem;
+        margin: 1rem 0;
+        border-radius: 8px;
+        color: #fde047;
+    }
+    
     /* Sidebar */
     [data-testid="stSidebar"] {
         background: #1a1a1a;
@@ -274,7 +283,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Load and process data
+# Load and process data with data quality checks
 @st.cache_data
 def load_and_process_data():
     df = pd.read_csv('cnmv_funds_data_FINAL.csv')
@@ -292,12 +301,87 @@ def load_and_process_data():
     df['month'] = df['date'].dt.month
     df['year_month'] = df['date'].dt.to_period('M')
     
+    # Data quality: remove duplicates if any
+    df = df.drop_duplicates(subset=['N_Registro', 'status', 'date'])
+    
     return df
 
 # Load main data
 df = load_and_process_data()
 
-# Calculate key metrics
+# Process lifecycle data with enhanced data quality checks
+@st.cache_data
+def process_lifecycle_data(df):
+    births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
+    deaths = df[df['status'] == 'BAJAS']
+    
+    births_lifecycle = births[births['N_Registro'].notna()].copy()
+    deaths_lifecycle = deaths[deaths['N_Registro'].notna()].copy()
+    
+    # Get unique funds with their first registration
+    unique_funds = births_lifecycle.groupby('N_Registro').agg({
+        'Nombre': 'first',
+        'date': 'min',  # First registration date
+        'Gestora': 'first',
+        'Depositaria': 'first'
+    }).reset_index()
+    unique_funds.columns = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Gestora', 'Depositaria']
+    
+    # Get death dates (first death date if multiple)
+    death_dates = deaths_lifecycle.groupby('N_Registro')['date'].min().reset_index()
+    death_dates.columns = ['N_Registro', 'Fecha_Baja']
+    
+    # Merge to create lifecycle
+    fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
+    
+    # Calculate life in years
+    fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
+    
+    # DATA QUALITY CHECKS AND CLEANING
+    initial_count = len(fund_lifecycle)
+    
+    # 1. Remove records where death date is before birth date (negative life)
+    invalid_dates = fund_lifecycle['Vida_Anos'] < 0
+    num_invalid_dates = invalid_dates.sum()
+    
+    # 2. Remove records with unreasonably long life (e.g., > 50 years)
+    too_long_life = fund_lifecycle['Vida_Anos'] > 50
+    num_too_long = too_long_life.sum()
+    
+    # 3. Keep track of removed records for reporting
+    removed_records = fund_lifecycle[invalid_dates | too_long_life].copy()
+    
+    # 4. Clean the data
+    fund_lifecycle = fund_lifecycle[~invalid_dates & ~too_long_life]
+    
+    # 5. Also remove funds with same birth and death date (0 days life) if suspicious
+    zero_life = (fund_lifecycle['Vida_Anos'] == 0) & fund_lifecycle['Fecha_Baja'].notna()
+    num_zero_life = zero_life.sum()
+    
+    # Optional: remove zero-life funds if they seem erroneous
+    # fund_lifecycle = fund_lifecycle[~zero_life]
+    
+    # Add status column
+    fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
+    fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
+    fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
+    
+    # Create data quality report
+    quality_report = {
+        'initial_count': initial_count,
+        'invalid_dates': num_invalid_dates,
+        'too_long_life': num_too_long,
+        'zero_life': num_zero_life,
+        'final_count': len(fund_lifecycle),
+        'removed_records': removed_records
+    }
+    
+    return fund_lifecycle, quality_report
+
+# Process lifecycle data with quality checks
+fund_lifecycle, quality_report = process_lifecycle_data(df)
+
+# Calculate key metrics using cleaned data
 births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
 deaths = df[df['status'] == 'BAJAS']
 
@@ -305,27 +389,6 @@ total_births = len(births)
 total_deaths = len(deaths)
 mortality_rate = (total_deaths / total_births * 100) if total_births > 0 else 0
 net_change = total_births - total_deaths
-
-# Process lifecycle data
-births_lifecycle = births[births['N_Registro'].notna()].copy()
-deaths_lifecycle = deaths[deaths['N_Registro'].notna()].copy()
-
-unique_funds = births_lifecycle.groupby('N_Registro').agg({
-    'Nombre': 'first',
-    'date': 'min',
-    'Gestora': 'first',
-    'Depositaria': 'first'
-}).reset_index()
-unique_funds.columns = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Gestora', 'Depositaria']
-
-death_dates = deaths_lifecycle.groupby('N_Registro')['date'].min().reset_index()
-death_dates.columns = ['N_Registro', 'Fecha_Baja']
-
-fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
-fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
-fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
-fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
-fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
 
 # Title
 st.markdown("# 📊 Análisis de Fondos Españoles - Sesgo de Supervivencia")
@@ -338,7 +401,22 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Simplified HTML newsletter banner
+# Data Quality Alert
+if quality_report['invalid_dates'] > 0 or quality_report['too_long_life'] > 0:
+    st.markdown(f"""
+    <div class="data-quality-box">
+        <h4>⚠️ Limpieza de Datos Aplicada</h4>
+        <p>Se han detectado y eliminado registros con datos incorrectos:</p>
+        <ul style="margin-left: 1rem;">
+            <li><strong>{quality_report['invalid_dates']}</strong> registros con vida negativa (fecha baja anterior a fecha alta)</li>
+            <li><strong>{quality_report['too_long_life']}</strong> registros con vida superior a 50 años (probables errores)</li>
+            <li><strong>{quality_report['zero_life']}</strong> registros con vida de 0 días</li>
+        </ul>
+        <p>Total de registros válidos: <strong>{quality_report['final_count']}</strong> de {quality_report['initial_count']} originales</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Newsletter banner
 st.markdown("""
 <div style='background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;'>
     <h3 style='color: #a5b4fc; margin: 0 0 10px 0;'>📬 BQuant Fund Lab Newsletter</h3>
@@ -365,10 +443,12 @@ with col2:
     )
 
 with col3:
+    # Use cleaned data for active count
+    active_funds = len(fund_lifecycle[fund_lifecycle['Fecha_Baja'].isna()])
     st.metric(
         label="Activos",
-        value=f"{total_births - total_deaths:,}",
-        delta="estimados"
+        value=f"{active_funds:,}",
+        delta="validados"
     )
 
 with col4:
@@ -379,8 +459,8 @@ with col4:
         delta_color="inverse"
     )
 
-# Main tabs (only 2 now)
-tabs = ["🔍 **Búsqueda de Fondos**", "📊 **Análisis Temporal**"]
+# Main tabs
+tabs = ["🔍 **Búsqueda de Fondos**", "📊 **Análisis Temporal**", "🔬 **Calidad de Datos**"]
 tab_list = st.tabs(tabs)
 
 # Tab 1: Fund Search (Enhanced)
@@ -529,7 +609,7 @@ with tab_list[0]:
         avg_vida = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]['Vida_Anos'].mean()
         st.metric("Vida Media", f"{avg_vida:.1f} años" if not pd.isna(avg_vida) else "N/A")
     
-    # Display ALL results in table
+    # Display results in table
     if total_in_search > 0:
         st.markdown(f"#### 📋 Resultados ({total_in_search:,} fondos encontrados)")
         
@@ -539,6 +619,11 @@ with tab_list[0]:
         
         display_lifecycle['Fecha_Alta'] = display_lifecycle['Fecha_Alta'].dt.strftime('%Y-%m-%d')
         display_lifecycle['Fecha_Baja'] = display_lifecycle['Fecha_Baja'].dt.strftime('%Y-%m-%d')
+        
+        # Ensure no negative values are displayed
+        display_lifecycle['Vida_Anos'] = display_lifecycle['Vida_Anos'].apply(
+            lambda x: x if pd.isna(x) or x >= 0 else None
+        )
         
         display_cols = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos', 'Estado_Actual', 'Gestora', 'Depositaria']
         
@@ -727,58 +812,70 @@ with tab_list[0]:
         with stat_tabs[3]:
             col1, col2, col3 = st.columns(3)
             
-            # Life duration distribution
-            liquidated_funds = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]
+            # Life duration distribution - only use valid positive values
+            liquidated_funds = filtered_lifecycle[
+                (filtered_lifecycle['Vida_Anos'].notna()) & 
+                (filtered_lifecycle['Vida_Anos'] >= 0)
+            ]
             
             with col1:
                 st.markdown("**⏱️ Distribución de Vida de Fondos Liquidados**")
-                life_bins = pd.cut(liquidated_funds['Vida_Anos'], 
-                                 bins=[0, 1, 3, 5, 10, 100],
-                                 labels=['< 1 año', '1-3 años', '3-5 años', '5-10 años', '> 10 años'])
-                life_dist = life_bins.value_counts().sort_index()
-                
-                life_dist_df = pd.DataFrame({
-                    'Duración': life_dist.index,
-                    'Fondos': life_dist.values,
-                    'Porcentaje': (life_dist.values / life_dist.sum() * 100).round(1)
-                })
-                st.dataframe(life_dist_df, use_container_width=True, hide_index=True)
+                if len(liquidated_funds) > 0:
+                    life_bins = pd.cut(liquidated_funds['Vida_Anos'], 
+                                     bins=[0, 1, 3, 5, 10, 100],
+                                     labels=['< 1 año', '1-3 años', '3-5 años', '5-10 años', '> 10 años'])
+                    life_dist = life_bins.value_counts().sort_index()
+                    
+                    life_dist_df = pd.DataFrame({
+                        'Duración': life_dist.index,
+                        'Fondos': life_dist.values,
+                        'Porcentaje': (life_dist.values / life_dist.sum() * 100).round(1)
+                    })
+                    st.dataframe(life_dist_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay datos de fondos liquidados con vida válida")
             
             with col2:
                 st.markdown("**📈 Estadísticas de Supervivencia**")
                 
-                # Calculate survival stats
-                median_life = liquidated_funds['Vida_Anos'].median()
-                q1_life = liquidated_funds['Vida_Anos'].quantile(0.25)
-                q3_life = liquidated_funds['Vida_Anos'].quantile(0.75)
-                
-                st.metric("Mediana de Vida", f"{median_life:.1f} años")
-                st.metric("25% mueren antes de", f"{q1_life:.1f} años")
-                st.metric("75% mueren antes de", f"{q3_life:.1f} años")
+                if len(liquidated_funds) > 0:
+                    # Calculate survival stats
+                    median_life = liquidated_funds['Vida_Anos'].median()
+                    q1_life = liquidated_funds['Vida_Anos'].quantile(0.25)
+                    q3_life = liquidated_funds['Vida_Anos'].quantile(0.75)
+                    
+                    st.metric("Mediana de Vida", f"{median_life:.1f} años")
+                    st.metric("25% mueren antes de", f"{q1_life:.1f} años")
+                    st.metric("75% mueren antes de", f"{q3_life:.1f} años")
+                else:
+                    st.info("No hay datos suficientes")
             
             with col3:
                 st.markdown("**💡 Insights Clave**")
                 
-                # Calculate key insights
-                infant_mortality = len(liquidated_funds[liquidated_funds['Vida_Anos'] < 1]) / len(liquidated_funds) * 100
-                long_survivors = len(filtered_lifecycle[
-                    (filtered_lifecycle['Vida_Anos'] > 10) | 
-                    ((filtered_lifecycle['Fecha_Baja'].isna()) & 
-                     ((pd.Timestamp.now() - filtered_lifecycle['Fecha_Alta']).dt.days / 365.25 > 10))
-                ]) / len(filtered_lifecycle) * 100
-                
-                st.info(f"""
-                **Mortalidad Infantil:** {infant_mortality:.1f}% de los fondos liquidados mueren en su primer año
-                
-                **Supervivientes a Largo Plazo:** Solo {long_survivors:.1f}% de los fondos superan los 10 años
-                
-                **Tasa de Mortalidad Global:** {(liquidated_in_search/total_in_search*100):.1f}% en la selección actual
-                """)
+                if len(liquidated_funds) > 0:
+                    # Calculate key insights
+                    infant_mortality = len(liquidated_funds[liquidated_funds['Vida_Anos'] < 1]) / len(liquidated_funds) * 100
+                    long_survivors = len(filtered_lifecycle[
+                        (filtered_lifecycle['Vida_Anos'] > 10) | 
+                        ((filtered_lifecycle['Fecha_Baja'].isna()) & 
+                         ((pd.Timestamp.now() - filtered_lifecycle['Fecha_Alta']).dt.days / 365.25 > 10))
+                    ]) / len(filtered_lifecycle) * 100
+                    
+                    st.info(f"""
+                    **Mortalidad Infantil:** {infant_mortality:.1f}% de los fondos liquidados mueren en su primer año
+                    
+                    **Supervivientes a Largo Plazo:** Solo {long_survivors:.1f}% de los fondos superan los 10 años
+                    
+                    **Tasa de Mortalidad Global:** {(liquidated_in_search/total_in_search*100):.1f}% en la selección actual
+                    """)
+                else:
+                    st.info("No hay datos suficientes para calcular insights")
     
     else:
         st.info("No se encontraron fondos con los criterios especificados. Prueba a ajustar los filtros.")
 
-# Tab 2: Enhanced Temporal Analysis (previously Tab 3)
+# Tab 2: Enhanced Temporal Analysis
 with tab_list[1]:
     st.markdown("### 📈 Evolución Temporal del Sesgo de Supervivencia")
     
@@ -1165,120 +1262,84 @@ with tab_list[1]:
             f"{best_period_value:+.0f}",
             f"{best_period_idx.strftime('%Y-%m-%d')}"
         )
-    
-    # Trend Analysis
-    st.markdown("### 📊 Análisis de Tendencias")
+
+# Tab 3: Data Quality Report
+with tab_list[2]:
+    st.markdown("### 🔬 Reporte de Calidad de Datos")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        # Mortality trend over time
-        fig_mortality = go.Figure()
+        st.markdown("#### 📊 Resumen de Limpieza de Datos")
         
-        fig_mortality.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats['Mortalidad_%'],
-            mode='lines+markers',
-            name='Tasa de Mortalidad',
-            line=dict(color='#ef4444', width=2, shape='spline'),
-            marker=dict(size=5, color='#ef4444'),
-            fill='tozeroy',
-            fillcolor='rgba(239, 68, 68, 0.1)',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Mortalidad: %{y:.1f}%<extra></extra>'
-        ))
+        quality_metrics = {
+            "Registros Originales": quality_report['initial_count'],
+            "Registros con Vida Negativa": quality_report['invalid_dates'],
+            "Registros con Vida > 50 años": quality_report['too_long_life'],
+            "Registros con Vida = 0 días": quality_report['zero_life'],
+            "Registros Válidos Finales": quality_report['final_count'],
+            "Tasa de Datos Válidos": f"{(quality_report['final_count']/quality_report['initial_count']*100):.1f}%"
+        }
         
-        # Add average line
-        fig_mortality.add_hline(
-            y=avg_mortality,
-            line_color='#fbbf24',
-            line_width=2,
-            line_dash="dash",
-            annotation_text=f"Media: {avg_mortality:.1f}%",
-            annotation_position="right",
-            annotation_font_color='#fbbf24'
-        )
-        
-        fig_mortality.update_layout(
-            title=f"Evolución de la Tasa de Mortalidad {time_label}ly",
-            xaxis_title="",
-            yaxis_title="Mortalidad (%)",
-            height=350,
-            plot_bgcolor='#0f0f0f',
-            paper_bgcolor='#0f0f0f',
-            font=dict(family='Inter', color='#e2e8f0', size=11),
-            xaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
-            yaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
-            hovermode='x unified',
-            showlegend=False
-        )
-        
-        st.plotly_chart(fig_mortality, use_container_width=True)
+        for metric, value in quality_metrics.items():
+            if isinstance(value, str):
+                st.metric(metric, value)
+            else:
+                st.metric(metric, f"{value:,}")
     
     with col2:
-        # Cumulative funds over time
-        fig_cumulative = go.Figure()
+        st.markdown("#### 🚨 Registros Problemáticos Eliminados")
         
-        fig_cumulative.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats['Acumulado'],
-            mode='lines+markers',
-            name='Fondos Acumulados',
-            line=dict(color='#6366f1', width=3, shape='spline'),
-            marker=dict(size=5, color='#6366f1'),
-            fill='tozeroy',
-            fillcolor='rgba(99, 102, 241, 0.1)',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Acumulado: %{y:+}<extra></extra>'
-        ))
-        
-        # Add trend line
-        z = np.polyfit(range(len(temporal_stats)), temporal_stats['Acumulado'], 1)
-        p = np.poly1d(z)
-        
-        fig_cumulative.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=p(range(len(temporal_stats))),
-            mode='lines',
-            name='Tendencia',
-            line=dict(color='#22c55e', width=2, dash='dash'),
-            opacity=0.7
-        ))
-        
-        fig_cumulative.update_layout(
-            title=f"Balance Acumulado de Fondos",
-            xaxis_title="",
-            yaxis_title="Balance Acumulado",
-            height=350,
-            plot_bgcolor='#0f0f0f',
-            paper_bgcolor='#0f0f0f',
-            font=dict(family='Inter', color='#e2e8f0', size=11),
-            xaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
-            yaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
-            hovermode='x unified',
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=1.1,
-                xanchor="center",
-                x=0.5,
-                bgcolor='rgba(26, 26, 26, 0.8)',
-                bordercolor='#333',
-                borderwidth=1,
-                font=dict(size=10)
-            )
-        )
-        
-        st.plotly_chart(fig_cumulative, use_container_width=True)
+        if len(quality_report['removed_records']) > 0:
+            st.warning(f"Se eliminaron {len(quality_report['removed_records'])} registros con datos incorrectos")
+            
+            # Show sample of removed records
+            if st.checkbox("Mostrar muestra de registros eliminados"):
+                sample = quality_report['removed_records'].head(10)
+                sample_display = sample[['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos']].copy()
+                sample_display['Problema'] = sample_display['Vida_Anos'].apply(
+                    lambda x: 'Vida negativa' if x < 0 else 'Vida excesiva (>50 años)' if x > 50 else 'Otro'
+                )
+                st.dataframe(sample_display, use_container_width=True, hide_index=True)
+        else:
+            st.success("No se detectaron registros problemáticos")
     
-    # Insights box
+    # Data quality visualization
+    st.markdown("---")
+    st.markdown("#### 📈 Visualización de Calidad de Datos")
+    
+    # Create pie chart for data quality
+    fig_quality = go.Figure(data=[go.Pie(
+        labels=['Datos Válidos', 'Vida Negativa', 'Vida Excesiva', 'Otros'],
+        values=[
+            quality_report['final_count'],
+            quality_report['invalid_dates'],
+            quality_report['too_long_life'],
+            quality_report['zero_life']
+        ],
+        hole=.3,
+        marker=dict(colors=['#22c55e', '#ef4444', '#fbbf24', '#94a3b8'])
+    )])
+    
+    fig_quality.update_layout(
+        title="Distribución de Calidad de Datos",
+        height=400,
+        plot_bgcolor='#0f0f0f',
+        paper_bgcolor='#0f0f0f',
+        font=dict(family='Inter', color='#e2e8f0')
+    )
+    
+    st.plotly_chart(fig_quality, use_container_width=True)
+    
+    # Data quality insights
     st.markdown("""
-    <div class="info-box" style="margin-top: 2rem;">
-        <h4>💡 Insights Clave del Análisis Temporal</h4>
+    <div class="info-box">
+        <h4>💡 Recomendaciones de Calidad de Datos</h4>
         <ul style="margin-left: 1rem;">
-            <li>La granularidad temporal revela patrones ocultos en los datos agregados anuales</li>
-            <li>Los períodos de crisis muestran picos significativos en las liquidaciones</li>
-            <li>La tendencia acumulada indica el sesgo real de supervivencia en el tiempo</li>
-            <li>La mortalidad media varía significativamente según el período analizado</li>
+            <li>Los registros con vida negativa indican errores en el registro de fechas</li>
+            <li>Vidas superiores a 50 años son probablemente errores de digitación</li>
+            <li>Es importante validar los datos fuente con la CNMV para estos casos</li>
+            <li>La limpieza aplicada mejora la precisión del análisis de supervivencia</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -1289,6 +1350,7 @@ st.markdown(f"""
 <div style="text-align: center; color: #64748b; padding: 2rem 0; font-size: 0.875rem;">
     <p>Este análisis demuestra el severo sesgo de supervivencia en la industria de fondos española.</p>
     <p>Con una tasa de mortalidad del {mortality_rate:.0f}%, las estadísticas publicadas no reflejan la realidad completa.</p>
+    <p>Datos limpios y validados para mayor precisión analítica.</p>
     <p style="margin-top: 1rem;">
         <a href="https://twitter.com/Gsnchez" target="_blank" style="color: #a5b4fc;">@Gsnchez</a> • 
         <a href="https://bquantfinance.com" target="_blank" style="color: #a5b4fc;">bquantfinance.com</a>
