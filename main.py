@@ -342,7 +342,7 @@ st.markdown("""
 st.markdown("""
 <div style='background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;'>
     <h3 style='color: #a5b4fc; margin: 0 0 10px 0;'>📬 BQuant Fund Lab Newsletter</h3>
-    <p style='color: #94a3b8; margin: 0 0 15px 0;'>Análisis cuantitativo semanal de fondos</p>
+    <p style='color: #94a3b8; margin: 0 0 15px 0;'>Análisis cuantitativo de fondos</p>
     <a href='https://bquantfundlab.substack.com/' target='_blank' style='background: #6366f1; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; display: inline-block;'>Suscribirse →</a>
 </div>
 """, unsafe_allow_html=True)
