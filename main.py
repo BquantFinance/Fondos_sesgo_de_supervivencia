@@ -17,45 +17,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-st.markdown("""
-<div style="background: rgba(99, 102, 241, 0.1); 
-            border: 1px solid rgba(99, 102, 241, 0.3);
-            padding: 1rem 1.5rem; 
-            border-radius: 12px; 
-            margin: 1.5rem 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 1rem;">
-    
-    <div style="display: flex; align-items: center; gap: 1rem;">
-        <span style="font-size: 1.5rem;">📬</span>
-        <div>
-            <strong style="color: #a5b4fc;">BQuant Fund Lab Newsletter</strong>
-            <span style="color: #94a3b8; margin-left: 0.5rem;">
-                • Análisis cuantitativo semanal de fondos
-            </span>
-        </div>
-    </div>
-    
-    <a href="https://bquantfundlab.substack.com/" 
-       target="_blank" 
-       style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); 
-              color: white; 
-              padding: 0.5rem 1.25rem; 
-              border-radius: 8px; 
-              text-decoration: none; 
-              font-weight: 500;
-              font-size: 0.95rem;
-              transition: opacity 0.3s ease;"
-       onmouseover="this.style.opacity='0.9';"
-       onmouseout="this.style.opacity='1';">
-        Suscribirse →
-    </a>
-    
-</div>
-""", unsafe_allow_html=True)
 
 # Dark mode aesthetic CSS
 st.markdown("""
@@ -375,6 +336,46 @@ st.markdown("""
     Por <a href="https://twitter.com/Gsnchez" target="_blank">@Gsnchez</a> • 
     <a href="https://bquantfinance.com" target="_blank">bquantfinance.com</a> • 
     Datos CNMV 2004-2025
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div style="background: rgba(99, 102, 241, 0.1); 
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            padding: 1rem 1.5rem; 
+            border-radius: 12px; 
+            margin: 1.5rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;">
+    
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <span style="font-size: 1.5rem;">📬</span>
+        <div>
+            <strong style="color: #a5b4fc;">BQuant Fund Lab Newsletter</strong>
+            <span style="color: #94a3b8; margin-left: 0.5rem;">
+                • Análisis cuantitativo semanal de fondos
+            </span>
+        </div>
+    </div>
+    
+    <a href="https://bquantfundlab.substack.com/" 
+       target="_blank" 
+       style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); 
+              color: white; 
+              padding: 0.5rem 1.25rem; 
+              border-radius: 8px; 
+              text-decoration: none; 
+              font-weight: 500;
+              font-size: 0.95rem;
+              transition: opacity 0.3s ease;"
+       onmouseover="this.style.opacity='0.9';"
+       onmouseout="this.style.opacity='1';">
+        Suscribirse →
+    </a>
+    
 </div>
 """, unsafe_allow_html=True)
 
