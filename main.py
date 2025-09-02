@@ -271,36 +271,6 @@ st.markdown("""
     .stSpinner > div {
         border-color: #6366f1;
     }
-    
-    /* Economic cycle badges */
-    .cycle-badge {
-        display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin: 0.25rem;
-    }
-    
-    .cycle-expansion {
-        background: rgba(34, 197, 94, 0.2);
-        color: #86efac;
-        border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-    
-    .cycle-crisis {
-        background: rgba(239, 68, 68, 0.2);
-        color: #fca5a5;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-    
-    .cycle-recovery {
-        background: rgba(99, 102, 241, 0.2);
-        color: #a5b4fc;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -324,55 +294,8 @@ def load_and_process_data():
     
     return df
 
-# Load macro data
-@st.cache_data
-def load_macro_data():
-    try:
-        start_date = '2004-01-01'
-        end_date = '2025-12-31'
-        
-        # Get Spanish unemployment and VIX
-        indicators = {
-            'LRHUTTTTESM156S': 'Spain_Unemployment',
-            'VIXCLS': 'VIX',
-            'DGS10': 'US_10Y_Bond'
-        }
-        
-        macro_data = pd.DataFrame()
-        for fred_code, name in indicators.items():
-            try:
-                series = wb.DataReader(fred_code, 'fred', start_date, end_date)
-                series.columns = [name]
-                if macro_data.empty:
-                    macro_data = series
-                else:
-                    macro_data = macro_data.join(series, how='outer')
-            except:
-                continue
-        
-        macro_data = macro_data.ffill()
-        return macro_data
-    except:
-        return pd.DataFrame()
-
-# Load S&P 500 data
-@st.cache_data
-def load_sp500_data():
-    try:
-        sp500 = yf.download('^GSPC', start='2004-01-01', end='2025-12-31', progress=False, multi_level_index=False)
-        sp500 = sp500[['Close']]
-        sp500.columns = ['SP500']
-        sp500['Returns'] = sp500['SP500'].pct_change() * 100
-        sp500['MA50'] = sp500['SP500'].rolling(window=50).mean()
-        sp500['MA200'] = sp500['SP500'].rolling(window=200).mean()
-        return sp500
-    except:
-        return pd.DataFrame()
-
 # Load main data
 df = load_and_process_data()
-macro_data = load_macro_data()
-sp500_data = load_sp500_data()
 
 # Calculate key metrics
 births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
@@ -382,6 +305,27 @@ total_births = len(births)
 total_deaths = len(deaths)
 mortality_rate = (total_deaths / total_births * 100) if total_births > 0 else 0
 net_change = total_births - total_deaths
+
+# Process lifecycle data
+births_lifecycle = births[births['N_Registro'].notna()].copy()
+deaths_lifecycle = deaths[deaths['N_Registro'].notna()].copy()
+
+unique_funds = births_lifecycle.groupby('N_Registro').agg({
+    'Nombre': 'first',
+    'date': 'min',
+    'Gestora': 'first',
+    'Depositaria': 'first'
+}).reset_index()
+unique_funds.columns = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Gestora', 'Depositaria']
+
+death_dates = deaths_lifecycle.groupby('N_Registro')['date'].min().reset_index()
+death_dates.columns = ['N_Registro', 'Fecha_Baja']
+
+fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
+fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
+fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
+fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
+fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
 
 # Title
 st.markdown("# 📊 Análisis de Fondos Españoles - Sesgo de Supervivencia")
@@ -426,34 +370,13 @@ with col4:
         delta_color="inverse"
     )
 
-# Main tabs
-tabs = ["🔍 **Búsqueda de Fondos**", "📈 **Ciclo Económico**", "📊 **Análisis Temporal**"]
+# Main tabs (only 2 now)
+tabs = ["🔍 **Búsqueda de Fondos**", "📊 **Análisis Temporal**"]
 tab_list = st.tabs(tabs)
 
-# Tab 1: Fund Search (ENHANCED VERSION)
+# Tab 1: Fund Search (Enhanced)
 with tab_list[0]:
     st.markdown("### Búsqueda y Ciclo de Vida de Fondos")
-    
-    # Process lifecycle data
-    births_lifecycle = births[births['N_Registro'].notna()].copy()
-    deaths_lifecycle = deaths[deaths['N_Registro'].notna()].copy()
-    
-    unique_funds = births_lifecycle.groupby('N_Registro').agg({
-        'Nombre': 'first',
-        'date': 'min',
-        'Gestora': 'first',
-        'Depositaria': 'first'
-    }).reset_index()
-    unique_funds.columns = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Gestora', 'Depositaria']
-    
-    death_dates = deaths_lifecycle.groupby('N_Registro')['date'].min().reset_index()
-    death_dates.columns = ['N_Registro', 'Fecha_Baja']
-    
-    fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
-    fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
-    fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
-    fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
-    fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
     
     # Enhanced search interface with multiple filters
     st.markdown("#### 🔍 Filtros de Búsqueda")
@@ -597,7 +520,7 @@ with tab_list[0]:
         avg_vida = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]['Vida_Anos'].mean()
         st.metric("Vida Media", f"{avg_vida:.1f} años" if not pd.isna(avg_vida) else "N/A")
     
-    # Display ALL results in table (no height limit for full scrolling)
+    # Display ALL results in table
     if total_in_search > 0:
         st.markdown(f"#### 📋 Resultados ({total_in_search:,} fondos encontrados)")
         
@@ -610,7 +533,6 @@ with tab_list[0]:
         
         display_cols = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos', 'Estado_Actual', 'Gestora', 'Depositaria']
         
-        # Show ALL results without height restriction
         st.dataframe(
             display_lifecycle[display_cols],
             use_container_width=True,
@@ -627,7 +549,7 @@ with tab_list[0]:
             }
         )
         
-        # INSIGHTFUL STATISTICS SECTION
+        # STATISTICS SECTION
         st.markdown("---")
         st.markdown("### 📊 Estadísticas Detalladas")
         
@@ -670,7 +592,7 @@ with tab_list[0]:
                     'Estado_Actual': lambda x: (x == '💀 Liquidado').sum()
                 })
                 mortality_gestoras.columns = ['Total', 'Liquidados']
-                mortality_gestoras = mortality_gestoras[mortality_gestoras['Total'] >= 5]  # At least 5 funds
+                mortality_gestoras = mortality_gestoras[mortality_gestoras['Total'] >= 5]
                 mortality_gestoras['Tasa_Mortalidad'] = (mortality_gestoras['Liquidados'] / mortality_gestoras['Total'] * 100).round(1)
                 mortality_gestoras = mortality_gestoras.sort_values('Tasa_Mortalidad', ascending=False).head(10)
                 
@@ -847,309 +769,8 @@ with tab_list[0]:
     else:
         st.info("No se encontraron fondos con los criterios especificados. Prueba a ajustar los filtros.")
 
-# Tab 2: Simplified Economic Cycle Analysis
+# Tab 2: Enhanced Temporal Analysis (previously Tab 3)
 with tab_list[1]:
-    st.markdown("### 💀 Mortalidad de Fondos y Ciclo Económico")
-    
-    # Prepare monthly data
-    monthly_stats = df.groupby(['year', 'month', 'status']).size().unstack(fill_value=0)
-    monthly_stats = monthly_stats.rename(columns={
-        'NUEVAS_INSCRIPCIONES': 'Altas',
-        'BAJAS': 'Bajas'
-    })
-    monthly_stats['Mortalidad'] = (monthly_stats['Bajas'] / monthly_stats['Altas'] * 100).fillna(0)
-    monthly_stats['Balance'] = monthly_stats['Altas'] - monthly_stats['Bajas']
-    monthly_stats = monthly_stats.reset_index()
-    monthly_stats['date'] = pd.to_datetime(monthly_stats[['year', 'month']].assign(day=1))
-    
-    # Calculate 6-month moving average for smoother trend
-    monthly_stats['Mortalidad_MA'] = monthly_stats['Mortalidad'].rolling(window=6, center=True).mean()
-    
-    # User controls for visualization
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        view_type = st.radio(
-            "Vista",
-            ["Mortalidad vs Mercado", "Flujos de Fondos", "Análisis de Crisis"],
-            horizontal=True
-        )
-    
-    # Create visualization based on selection
-    if view_type == "Mortalidad vs Mercado":
-        if not sp500_data.empty:
-            # Create a simple dual-axis chart
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            # Add S&P 500
-            fig.add_trace(
-                go.Scatter(
-                    x=sp500_data.index,
-                    y=sp500_data['SP500'],
-                    name='S&P 500',
-                    line=dict(color='#6366f1', width=2),
-                    opacity=0.7,
-                    hovertemplate='S&P 500: $%{y:,.0f}<extra></extra>'
-                ),
-                secondary_y=False
-            )
-            
-            # Add mortality rate (smoothed)
-            fig.add_trace(
-                go.Scatter(
-                    x=monthly_stats['date'],
-                    y=monthly_stats['Mortalidad_MA'],
-                    name='Tasa de Mortalidad (Media 6M)',
-                    line=dict(color='#ef4444', width=3),
-                    hovertemplate='Mortalidad: %{y:.1f}%<extra></extra>'
-                ),
-                secondary_y=True
-            )
-            
-            # Add crisis annotations
-            crisis_annotations = [
-                dict(x='2008-09-15', y=1, yref='paper', text='Lehman<br>Brothers', 
-                     showarrow=True, arrowhead=2, ax=0, ay=-40,
-                     font=dict(size=10, color='#ef4444')),
-                dict(x='2011-08-15', y=1, yref='paper', text='Crisis<br>Deuda EU', 
-                     showarrow=True, arrowhead=2, ax=0, ay=-40,
-                     font=dict(size=10, color='#ef4444')),
-                dict(x='2020-03-15', y=1, yref='paper', text='COVID-19', 
-                     showarrow=True, arrowhead=2, ax=0, ay=-40,
-                     font=dict(size=10, color='#ef4444'))
-            ]
-            
-            fig.update_layout(
-                title="Relación Inversa: Cuando el Mercado Cae, la Mortalidad Sube",
-                xaxis_title="",
-                height=500,
-                plot_bgcolor='#1a1a1a',
-                paper_bgcolor='#0f0f0f',
-                font=dict(family='Inter', color='#e2e8f0'),
-                hovermode='x unified',
-                annotations=crisis_annotations,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="center",
-                    x=0.5
-                )
-            )
-            
-            fig.update_yaxes(title_text="S&P 500 ($)", secondary_y=False, gridcolor='#333')
-            fig.update_yaxes(title_text="Mortalidad (%)", secondary_y=True, gridcolor='#333')
-            fig.update_xaxes(gridcolor='#333')
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Simple insight boxes
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                max_mortality = monthly_stats['Mortalidad'].max()
-                max_date = monthly_stats.loc[monthly_stats['Mortalidad'].idxmax(), 'date']
-                st.metric(
-                    "Pico de Mortalidad",
-                    f"{max_mortality:.0f}%",
-                    f"{max_date.strftime('%b %Y')}"
-                )
-            
-            with col2:
-                avg_crisis = monthly_stats[monthly_stats['year'].isin([2008, 2009, 2011, 2012, 2020])]['Mortalidad'].mean()
-                avg_normal = monthly_stats[~monthly_stats['year'].isin([2008, 2009, 2011, 2012, 2020])]['Mortalidad'].mean()
-                st.metric(
-                    "Mortalidad en Crisis",
-                    f"{avg_crisis:.0f}%",
-                    f"+{(avg_crisis/avg_normal - 1)*100:.0f}% vs normal"
-                )
-            
-            with col3:
-                if 'VIX' in macro_data.columns:
-                    monthly_vix = macro_data.resample('M')['VIX'].mean()
-                    correlation_data = monthly_stats.set_index('date').join(monthly_vix, how='inner')
-                    if len(correlation_data) > 10:
-                        corr = correlation_data['Mortalidad'].corr(correlation_data['VIX'])
-                        st.metric(
-                            "Correlación con VIX",
-                            f"{corr:.3f}",
-                            "Correlación positiva" if corr > 0 else "Correlación negativa"
-                        )
-    
-    elif view_type == "Flujos de Fondos":
-        # Create waterfall chart showing cumulative effect
-        fig = go.Figure()
-        
-        # Prepare yearly data for waterfall
-        yearly_data = monthly_stats.groupby('year').agg({
-            'Altas': 'sum',
-            'Bajas': 'sum',
-            'Balance': 'sum'
-        }).reset_index()
-        
-        # Create measure column for waterfall
-        measures = []
-        for _, row in yearly_data.iterrows():
-            if row['Balance'] >= 0:
-                measures.append('relative')
-            else:
-                measures.append('relative')
-        
-        # Add a total at the end
-        total_balance = yearly_data['Balance'].sum()
-        
-        fig.add_trace(go.Waterfall(
-            x=yearly_data['year'].astype(str).tolist() + ['Total'],
-            y=yearly_data['Balance'].tolist() + [None],
-            measure=measures + ['total'],
-            text=[f"{v:+}" for v in yearly_data['Balance']] + [f"{total_balance:+}"],
-            textposition="outside",
-            increasing={"marker": {"color": "rgba(34, 197, 94, 0.8)"}},
-            decreasing={"marker": {"color": "rgba(239, 68, 68, 0.8)"}},
-            totals={"marker": {"color": "rgba(99, 102, 241, 0.8)"}},
-            connector={"line": {"color": "rgba(255, 255, 255, 0.2)"}},
-            name="Balance Anual"
-        ))
-        
-        fig.update_layout(
-            title="Flujo Acumulado de Fondos: El Sesgo se Construye Año a Año",
-            xaxis_title="Año",
-            yaxis_title="Balance Neto de Fondos",
-            height=500,
-            plot_bgcolor='#1a1a1a',
-            paper_bgcolor='#0f0f0f',
-            font=dict(family='Inter', color='#e2e8f0'),
-            showlegend=False
-        )
-        
-        fig.update_xaxes(gridcolor='#333')
-        fig.update_yaxes(gridcolor='#333')
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Summary statistics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Creados", f"{yearly_data['Altas'].sum():,}")
-        with col2:
-            st.metric("Total Liquidados", f"{yearly_data['Bajas'].sum():,}")
-        with col3:
-            st.metric("Balance Total", f"{total_balance:+,}")
-        with col4:
-            survival_rate = (1 - yearly_data['Bajas'].sum() / yearly_data['Altas'].sum()) * 100
-            st.metric("Tasa Supervivencia", f"{survival_rate:.1f}%")
-    
-    else:  # Análisis de Crisis
-        # Create focused crisis analysis
-        crisis_periods = [
-            {"name": "Pre-Crisis", "start": "2004-01-01", "end": "2008-08-31", "type": "normal"},
-            {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-12-31", "type": "crisis"},
-            {"name": "Recuperación", "start": "2010-01-01", "end": "2011-07-31", "type": "recovery"},
-            {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-12-31", "type": "crisis"},
-            {"name": "Expansión", "start": "2013-01-01", "end": "2019-12-31", "type": "normal"},
-            {"name": "COVID-19", "start": "2020-01-01", "end": "2020-12-31", "type": "crisis"},
-            {"name": "Post-COVID", "start": "2021-01-01", "end": "2025-12-31", "type": "recovery"}
-        ]
-        
-        # Calculate metrics for each period
-        period_data = []
-        for period in crisis_periods:
-            mask = (monthly_stats['date'] >= period['start']) & (monthly_stats['date'] <= period['end'])
-            period_stats = monthly_stats[mask]
-            
-            if len(period_stats) > 0:
-                period_data.append({
-                    'Período': period['name'],
-                    'Tipo': period['type'],
-                    'Altas': period_stats['Altas'].sum(),
-                    'Bajas': period_stats['Bajas'].sum(),
-                    'Balance': period_stats['Balance'].sum(),
-                    'Mortalidad_Media': period_stats['Mortalidad'].mean(),
-                    'Mortalidad_Max': period_stats['Mortalidad'].max()
-                })
-        
-        period_df = pd.DataFrame(period_data)
-        
-        # Create grouped bar chart
-        fig = go.Figure()
-        
-        colors_map = {
-            'crisis': '#ef4444',
-            'normal': '#22c55e',
-            'recovery': '#6366f1'
-        }
-        
-        fig.add_trace(go.Bar(
-            x=period_df['Período'],
-            y=period_df['Mortalidad_Media'],
-            name='Mortalidad Media',
-            marker_color=[colors_map[t] for t in period_df['Tipo']],
-            text=period_df['Mortalidad_Media'].round(0),
-            textposition='outside',
-            texttemplate='%{text}%',
-            hovertemplate='<b>%{x}</b><br>Mortalidad Media: %{y:.1f}%<extra></extra>'
-        ))
-        
-        fig.update_layout(
-            title="Impacto de las Crisis: La Mortalidad se Multiplica",
-            xaxis_title="",
-            yaxis_title="Tasa de Mortalidad Media (%)",
-            height=500,
-            plot_bgcolor='#1a1a1a',
-            paper_bgcolor='#0f0f0f',
-            font=dict(family='Inter', color='#e2e8f0'),
-            showlegend=False
-        )
-        
-        fig.update_xaxes(gridcolor='#333', tickangle=45)
-        fig.update_yaxes(gridcolor='#333')
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Period comparison table
-        st.markdown("#### 📊 Comparación Detallada por Período")
-        
-        display_df = period_df.copy()
-        display_df['Mortalidad_Media'] = display_df['Mortalidad_Media'].round(1)
-        display_df['Mortalidad_Max'] = display_df['Mortalidad_Max'].round(0)
-        display_df['Tipo'] = display_df['Tipo'].map({
-            'crisis': '🔴 Crisis',
-            'normal': '🟢 Normal',
-            'recovery': '🔵 Recuperación'
-        })
-        
-        st.dataframe(
-            display_df[['Período', 'Tipo', 'Altas', 'Bajas', 'Balance', 'Mortalidad_Media', 'Mortalidad_Max']],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Período": st.column_config.TextColumn("Período", width="medium"),
-                "Tipo": st.column_config.TextColumn("Tipo", width="small"),
-                "Altas": st.column_config.NumberColumn("Altas", format="%d"),
-                "Bajas": st.column_config.NumberColumn("Bajas", format="%d"),
-                "Balance": st.column_config.NumberColumn("Balance", format="%+d"),
-                "Mortalidad_Media": st.column_config.NumberColumn("Mortalidad Media %", format="%.1f%%"),
-                "Mortalidad_Max": st.column_config.NumberColumn("Mortalidad Máx %", format="%.0f%%")
-            }
-        )
-    
-    # Simple key insight at bottom
-    st.markdown("""
-    <div style="background: rgba(99, 102, 241, 0.1); 
-                padding: 1.5rem; 
-                border-radius: 12px; 
-                margin-top: 2rem;
-                border-left: 4px solid #6366f1;">
-        <h4 style="color: #a5b4fc; margin-bottom: 0.5rem;">💡 El Sesgo Oculto</h4>
-        <p style="color: #e2e8f0; line-height: 1.6;">
-            Durante las crisis económicas, la mortalidad de fondos puede superar el 500% (5 bajas por cada alta). 
-            Los inversores que solo ven los fondos supervivientes pierden esta información crítica sobre el riesgo real del mercado.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-with tab_list[2]:
     st.markdown("### 📈 Evolución Temporal del Sesgo de Supervivencia")
     
     # Time granularity selector
@@ -1159,7 +780,7 @@ with tab_list[2]:
         time_granularity = st.selectbox(
             "📅 Granularidad Temporal",
             options=['Semanal', 'Mensual', 'Trimestral', 'Anual'],
-            index=3,  # Default to Annual
+            index=3,
             help="Selecciona el período de agregación para el análisis"
         )
     
@@ -1203,7 +824,7 @@ with tab_list[2]:
         temporal_stats = df_temp.groupby(['week', 'status']).size().unstack(fill_value=0)
         temporal_stats.index = temporal_stats.index.to_timestamp()
         time_label = "Semana"
-        ma_window = 4  # 4-week moving average
+        ma_window = 4
         
     elif time_granularity == 'Mensual':
         # Monthly aggregation
@@ -1215,7 +836,7 @@ with tab_list[2]:
         temporal_stats = df_temp.groupby(['year_month', 'status']).size().unstack(fill_value=0)
         temporal_stats.index = temporal_stats.index.to_timestamp()
         time_label = "Mes"
-        ma_window = 3  # 3-month moving average
+        ma_window = 3
         
     elif time_granularity == 'Trimestral':
         # Quarterly aggregation
@@ -1228,14 +849,14 @@ with tab_list[2]:
         temporal_stats = df_temp.groupby(['quarter', 'status']).size().unstack(fill_value=0)
         temporal_stats.index = temporal_stats.index.to_timestamp()
         time_label = "Trimestre"
-        ma_window = 4  # 4-quarter moving average
+        ma_window = 4
         
     else:  # Annual
         # Yearly aggregation
         temporal_stats = df.groupby(['year', 'status']).size().unstack(fill_value=0)
         temporal_stats.index = pd.to_datetime(temporal_stats.index.astype(str) + '-01-01')
         time_label = "Año"
-        ma_window = 2  # 2-year moving average
+        ma_window = 2
     
     # Rename columns for consistency
     if 'NUEVAS_INSCRIPCIONES' in temporal_stats.columns:
@@ -1264,8 +885,7 @@ with tab_list[2]:
             name='🟢 Altas',
             marker=dict(
                 color='rgba(34, 197, 94, 0.9)',
-                line=dict(color='rgba(34, 197, 94, 1)', width=1),
-                pattern=dict(shape="", fgcolor="rgba(34, 197, 94, 0.1)")
+                line=dict(color='rgba(34, 197, 94, 1)', width=1)
             ),
             text=temporal_stats.get('Altas', 0),
             textposition='outside',
@@ -1279,8 +899,7 @@ with tab_list[2]:
             name='🔴 Bajas',
             marker=dict(
                 color='rgba(239, 68, 68, 0.9)',
-                line=dict(color='rgba(239, 68, 68, 1)', width=1),
-                pattern=dict(shape="", fgcolor="rgba(239, 68, 68, 0.1)")
+                line=dict(color='rgba(239, 68, 68, 1)', width=1)
             ),
             text=temporal_stats.get('Bajas', 0),
             textposition='outside',
@@ -1389,9 +1008,9 @@ with tab_list[2]:
     
     # Add crisis period annotations
     crisis_periods = [
-        {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01", "y_pos": 0.9},
-        {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01", "y_pos": 0.85},
-        {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01", "y_pos": 0.8}
+        {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01"},
+        {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01"},
+        {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01"}
     ]
     
     for period in crisis_periods:
@@ -1419,7 +1038,7 @@ with tab_list[2]:
     # Update layout with dark aesthetic
     fig.update_layout(
         title=dict(
-            text=f"<b>Evolución {time_label} | Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
+            text=f"<b>Evolución {time_label}ly del Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
             font=dict(size=20, color='#f1f5f9'),
             x=0.5,
             xanchor='center'
@@ -1432,7 +1051,7 @@ with tab_list[2]:
             zerolinecolor='rgba(255, 255, 255, 0.1)',
             tickfont=dict(color='#94a3b8'),
             rangeslider=dict(
-                visible=False  # Enable range slider for time series
+                visible=False
             ),
             type='date'
         ),
