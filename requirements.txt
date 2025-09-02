@@ -7,3 +7,4 @@ seaborn
 openpyxl
 pandas_datareader
 yfinance
+scipy
