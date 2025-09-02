@@ -1322,11 +1322,18 @@ with tab_list[2]:
                 x1=period["end"],
                 fillcolor="rgba(239, 68, 68, 0.08)",
                 layer="below",
-                line=dict(width=0),
-                annotation_text=period["name"],
-                annotation_position="top",
-                annotation_font_color="rgba(239, 68, 68, 0.5)",
-                annotation_font_size=10
+                line_width=0
+            )
+            
+            # Add annotation separately
+            fig.add_annotation(
+                x=pd.to_datetime(period["start"]) + (pd.to_datetime(period["end"]) - pd.to_datetime(period["start"]))/2,
+                y=1,
+                yref="paper",
+                text=period["name"],
+                showarrow=False,
+                font=dict(color="rgba(239, 68, 68, 0.5)", size=10),
+                yanchor="bottom"
             )
     
     # Update layout with dark aesthetic
