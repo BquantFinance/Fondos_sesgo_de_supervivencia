@@ -394,7 +394,7 @@ net_change = total_births - total_deaths
 st.markdown("# 📊 Análisis de Fondos Españoles - Sesgo de Supervivencia")
 st.markdown("""
 <div class="author-box">
-    <strong>Análisis del Sesgo de Supervivencia en Fondos de Inversión</strong><br>
+    <strong>Análisis del Sesgo de Supervivencia en Fondos de Inversión 11/2004 - 09/2025</strong><br>
     Por <a href="https://twitter.com/Gsnchez" target="_blank">@Gsnchez</a> • 
     <a href="https://bquantfinance.com" target="_blank">bquantfinance.com</a> • 
     Datos CNMV 2004-2025
