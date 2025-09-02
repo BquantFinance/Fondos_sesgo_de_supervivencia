@@ -17,7 +17,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-
 # Dark mode aesthetic CSS
 st.markdown("""
 <style>
