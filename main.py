@@ -1673,7 +1673,7 @@ with tab_list[2]:
     # Update layout with dark aesthetic
     fig.update_layout(
         title=dict(
-            text=f"<b>Evolución {time_label} y del Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
+            text=f"<b>Evolución {time_label} | Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
             font=dict(size=20, color='#f1f5f9'),
             x=0.5,
             xanchor='center'
