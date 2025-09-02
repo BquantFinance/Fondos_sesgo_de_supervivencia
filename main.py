@@ -847,7 +847,7 @@ with tab_list[0]:
     else:
         st.info("No se encontraron fondos con los criterios especificados. Prueba a ajustar los filtros.")
 
-# Tab 2: Enhanced Economic Cycle Analysis
+# Tab 2: Simplified Economic Cycle Analysis
 with tab_list[1]:
     st.markdown("### 💀 Mortalidad de Fondos y Ciclo Económico")
     
@@ -862,547 +862,293 @@ with tab_list[1]:
     monthly_stats = monthly_stats.reset_index()
     monthly_stats['date'] = pd.to_datetime(monthly_stats[['year', 'month']].assign(day=1))
     
-    # Add 3-month moving average for smoother mortality trend
-    monthly_stats['Mortalidad_MA'] = monthly_stats['Mortalidad'].rolling(window=3, center=True).mean()
+    # Calculate 6-month moving average for smoother trend
+    monthly_stats['Mortalidad_MA'] = monthly_stats['Mortalidad'].rolling(window=6, center=True).mean()
     
-    # Define economic phases with colors
-    crisis_periods = [
-        {
-            "name": "CRISIS FINANCIERA GLOBAL",
-            "start": "2008-09-01",
-            "end": "2009-06-01",
-            "color": "rgba(220, 38, 38, 0.15)",
-            "border_color": "rgba(220, 38, 38, 0.5)",
-            "phase": "recession"
-        },
-        {
-            "name": "CRISIS DEUDA EUROPEA",
-            "start": "2011-08-01",
-            "end": "2012-07-01",
-            "color": "rgba(239, 68, 68, 0.15)",
-            "border_color": "rgba(239, 68, 68, 0.5)",
-            "phase": "recession"
-        },
-        {
-            "name": "PANDEMIA COVID-19",
-            "start": "2020-02-01",
-            "end": "2020-05-01",
-            "color": "rgba(185, 28, 28, 0.15)",
-            "border_color": "rgba(185, 28, 28, 0.5)",
-            "phase": "recession"
-        }
-    ]
+    # User controls for visualization
+    col1, col2, col3 = st.columns([1, 1, 1])
     
-    expansion_periods = [
-        {
-            "name": "EXPANSIÓN PRE-CRISIS",
-            "start": "2004-01-01",
-            "end": "2008-08-31",
-            "color": "rgba(34, 197, 94, 0.05)",
-            "phase": "expansion"
-        },
-        {
-            "name": "RECUPERACIÓN POST-CRISIS",
-            "start": "2013-01-01",
-            "end": "2019-12-31",
-            "color": "rgba(34, 197, 94, 0.05)",
-            "phase": "expansion"
-        },
-        {
-            "name": "RECUPERACIÓN POST-COVID",
-            "start": "2021-01-01",
-            "end": "2025-12-31",
-            "color": "rgba(34, 197, 94, 0.05)",
-            "phase": "expansion"
-        }
-    ]
+    with col1:
+        view_type = st.radio(
+            "Vista",
+            ["Mortalidad vs Mercado", "Flujos de Fondos", "Análisis de Crisis"],
+            horizontal=True
+        )
     
-    # Create sophisticated macro analysis
-    if not sp500_data.empty and not macro_data.empty:
-        # Create figure with custom layout
-        fig = make_subplots(
-            rows=5, cols=1,
-            row_heights=[0.25, 0.20, 0.20, 0.20, 0.15],
-            vertical_spacing=0.02,
-            subplot_titles=(
-                '<b>RELACIÓN S&P 500 vs MORTALIDAD DE FONDOS</b>',
-                '<b>ÍNDICE DE MIEDO (VIX)</b>',
-                '<b>DESEMPLEO ESPAÑA</b>',
-                '<b>FLUJOS NETOS DE FONDOS</b>',
-                '<b>FASES DEL CICLO ECONÓMICO</b>'
-            ),
-            specs=[
-                [{"secondary_y": True}],
-                [{"secondary_y": False}],
-                [{"secondary_y": False}],
-                [{"secondary_y": False}],
-                [{"secondary_y": False}]
+    # Create visualization based on selection
+    if view_type == "Mortalidad vs Mercado":
+        if not sp500_data.empty:
+            # Create a simple dual-axis chart
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Add S&P 500
+            fig.add_trace(
+                go.Scatter(
+                    x=sp500_data.index,
+                    y=sp500_data['SP500'],
+                    name='S&P 500',
+                    line=dict(color='#6366f1', width=2),
+                    opacity=0.7,
+                    hovertemplate='S&P 500: $%{y:,.0f}<extra></extra>'
+                ),
+                secondary_y=False
+            )
+            
+            # Add mortality rate (smoothed)
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly_stats['date'],
+                    y=monthly_stats['Mortalidad_MA'],
+                    name='Tasa de Mortalidad (Media 6M)',
+                    line=dict(color='#ef4444', width=3),
+                    hovertemplate='Mortalidad: %{y:.1f}%<extra></extra>'
+                ),
+                secondary_y=True
+            )
+            
+            # Add crisis annotations
+            crisis_annotations = [
+                dict(x='2008-09-15', y=1, yref='paper', text='Lehman<br>Brothers', 
+                     showarrow=True, arrowhead=2, ax=0, ay=-40,
+                     font=dict(size=10, color='#ef4444')),
+                dict(x='2011-08-15', y=1, yref='paper', text='Crisis<br>Deuda EU', 
+                     showarrow=True, arrowhead=2, ax=0, ay=-40,
+                     font=dict(size=10, color='#ef4444')),
+                dict(x='2020-03-15', y=1, yref='paper', text='COVID-19', 
+                     showarrow=True, arrowhead=2, ax=0, ay=-40,
+                     font=dict(size=10, color='#ef4444'))
             ]
-        )
-        
-        # Panel 1: S&P 500 and Fund Mortality with enhanced styling
-        # Add S&P 500 with gradient fill
-        fig.add_trace(
-            go.Scatter(
-                x=sp500_data.index,
-                y=sp500_data['SP500'],
-                name='S&P 500',
-                fill='tozeroy',
-                fillcolor='rgba(99, 102, 241, 0.03)',
-                line=dict(color='#6366f1', width=1),
-                hovertemplate='S&P 500: $%{y:,.0f}<extra></extra>',
-                showlegend=True,
-                legendgroup='sp500'
-            ),
-            row=1, col=1,
-            secondary_y=False
-        )
-        
-        # Add moving averages for S&P
-        fig.add_trace(
-            go.Scatter(
-                x=sp500_data.index,
-                y=sp500_data['MA50'],
-                name='MA50',
-                line=dict(color='rgba(99, 102, 241, 0.5)', width=1, dash='dot'),
-                hovertemplate='MA50: $%{y:,.0f}<extra></extra>',
-                showlegend=False
-            ),
-            row=1, col=1,
-            secondary_y=False
-        )
-        
-        # Add mortality rate with enhanced styling
-        fig.add_trace(
-            go.Scatter(
-                x=monthly_stats['date'],
-                y=monthly_stats['Mortalidad'],
-                name='Mortalidad (%)',
-                line=dict(color='rgba(239, 68, 68, 0.3)', width=1),
-                hovertemplate='Mortalidad: %{y:.1f}%<extra></extra>',
-                showlegend=False,
-                opacity=0.3
-            ),
-            row=1, col=1,
-            secondary_y=True
-        )
-        
-        # Add smoothed mortality trend
-        fig.add_trace(
-            go.Scatter(
-                x=monthly_stats['date'],
-                y=monthly_stats['Mortalidad_MA'],
-                name='Mortalidad (Media Móvil)',
-                line=dict(color='#ef4444', width=2.5),
-                hovertemplate='Mortalidad MA: %{y:.1f}%<extra></extra>',
-                showlegend=True,
-                legendgroup='mortality'
-            ),
-            row=1, col=1,
-            secondary_y=True
-        )
-        
-        # Panel 2: VIX with fear levels
-        if 'VIX' in macro_data.columns:
-            # Add VIX base
-            fig.add_trace(
-                go.Scatter(
-                    x=macro_data.index,
-                    y=macro_data['VIX'],
-                    name='VIX',
-                    fill='tozeroy',
-                    fillcolor='rgba(251, 191, 36, 0.1)',
-                    line=dict(color='#fbbf24', width=1.5),
-                    hovertemplate='VIX: %{y:.1f}<extra></extra>',
-                    showlegend=True,
-                    legendgroup='vix'
-                ),
-                row=2, col=1
-            )
             
-            # Add fear level zones
-            fig.add_hrect(y0=30, y1=100, fillcolor="rgba(239, 68, 68, 0.1)",
-                         layer="below", line_width=0, row=2, col=1)
-            fig.add_hrect(y0=20, y1=30, fillcolor="rgba(251, 191, 36, 0.05)",
-                         layer="below", line_width=0, row=2, col=1)
-            
-            # Add annotations for fear levels
-            fig.add_annotation(x=macro_data.index[-1], y=35,
-                             text="PÁNICO", showarrow=False,
-                             font=dict(size=9, color='rgba(239, 68, 68, 0.5)'),
-                             row=2, col=1)
-            fig.add_annotation(x=macro_data.index[-1], y=25,
-                             text="ESTRÉS", showarrow=False,
-                             font=dict(size=9, color='rgba(251, 191, 36, 0.5)'),
-                             row=2, col=1)
-        
-        # Panel 3: Spanish Unemployment with recession indicator
-        if 'Spain_Unemployment' in macro_data.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=macro_data.index,
-                    y=macro_data['Spain_Unemployment'],
-                    name='Desempleo España',
-                    fill='tozeroy',
-                    fillcolor='rgba(239, 68, 68, 0.05)',
-                    line=dict(color='#dc2626', width=2),
-                    hovertemplate='Desempleo: %{y:.1f}%<extra></extra>',
-                    showlegend=True,
-                    legendgroup='unemployment'
-                ),
-                row=3, col=1
-            )
-            
-            # Add average line
-            avg_unemployment = macro_data['Spain_Unemployment'].mean()
-            fig.add_hline(y=avg_unemployment, line_color='rgba(220, 38, 38, 0.3)',
-                         line_width=1, line_dash="dash", row=3, col=1)
-        
-        # Panel 4: Net Fund Balance with color coding
-        colors = ['rgba(34, 197, 94, 0.8)' if x >= 0 else 'rgba(239, 68, 68, 0.8)' 
-                 for x in monthly_stats['Balance']]
-        
-        fig.add_trace(
-            go.Bar(
-                x=monthly_stats['date'],
-                y=monthly_stats['Balance'],
-                name='Balance Neto',
-                marker=dict(
-                    color=colors,
-                    line=dict(width=0)
-                ),
-                hovertemplate='Balance: %{y:+}<extra></extra>',
-                showlegend=True,
-                legendgroup='balance'
-            ),
-            row=4, col=1
-        )
-        
-        # Add zero line
-        fig.add_hline(y=0, line_color='rgba(255, 255, 255, 0.2)',
-                     line_width=1, row=4, col=1)
-        
-        # Panel 5: Economic Cycle Phases Timeline
-        # Create phase indicator bars
-        phase_data = []
-        for period in crisis_periods:
-            phase_data.append({
-                'start': pd.to_datetime(period['start']),
-                'end': pd.to_datetime(period['end']),
-                'phase': 'RECESIÓN',
-                'name': period['name'],
-                'y': 1
-            })
-        
-        for period in expansion_periods:
-            phase_data.append({
-                'start': pd.to_datetime(period['start']),
-                'end': pd.to_datetime(period['end']),
-                'phase': 'EXPANSIÓN',
-                'name': period['name'],
-                'y': 0
-            })
-        
-        # Add phase bars
-        for phase in phase_data:
-            color = 'rgba(239, 68, 68, 0.6)' if phase['phase'] == 'RECESIÓN' else 'rgba(34, 197, 94, 0.3)'
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=[phase['start'], phase['end'], phase['end'], phase['start'], phase['start']],
-                    y=[phase['y']-0.4, phase['y']-0.4, phase['y']+0.4, phase['y']+0.4, phase['y']-0.4],
-                    fill='toself',
-                    fillcolor=color,
-                    line=dict(width=0),
-                    hovertemplate=f"<b>{phase['name']}</b><br>{phase['phase']}<extra></extra>",
-                    showlegend=False,
-                    name=phase['name']
-                ),
-                row=5, col=1
-            )
-        
-        # Add crisis period shading across all panels
-        for period in crisis_periods:
-            for row in range(1, 5):
-                fig.add_vrect(
-                    x0=period["start"],
-                    x1=period["end"],
-                    fillcolor=period["color"],
-                    layer="below",
-                    line_width=0,
-                    row=row, col=1
+            fig.update_layout(
+                title="Relación Inversa: Cuando el Mercado Cae, la Mortalidad Sube",
+                xaxis_title="",
+                height=500,
+                plot_bgcolor='#1a1a1a',
+                paper_bgcolor='#0f0f0f',
+                font=dict(family='Inter', color='#e2e8f0'),
+                hovermode='x unified',
+                annotations=crisis_annotations,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5
                 )
-        
-        # Add expansion period shading (subtle)
-        for period in expansion_periods:
-            for row in range(1, 5):
-                fig.add_vrect(
-                    x0=period["start"],
-                    x1=period["end"],
-                    fillcolor=period["color"],
-                    layer="below",
-                    line_width=0,
-                    row=row, col=1
+            )
+            
+            fig.update_yaxes(title_text="S&P 500 ($)", secondary_y=False, gridcolor='#333')
+            fig.update_yaxes(title_text="Mortalidad (%)", secondary_y=True, gridcolor='#333')
+            fig.update_xaxes(gridcolor='#333')
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Simple insight boxes
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                max_mortality = monthly_stats['Mortalidad'].max()
+                max_date = monthly_stats.loc[monthly_stats['Mortalidad'].idxmax(), 'date']
+                st.metric(
+                    "Pico de Mortalidad",
+                    f"{max_mortality:.0f}%",
+                    f"{max_date.strftime('%b %Y')}"
                 )
+            
+            with col2:
+                avg_crisis = monthly_stats[monthly_stats['year'].isin([2008, 2009, 2011, 2012, 2020])]['Mortalidad'].mean()
+                avg_normal = monthly_stats[~monthly_stats['year'].isin([2008, 2009, 2011, 2012, 2020])]['Mortalidad'].mean()
+                st.metric(
+                    "Mortalidad en Crisis",
+                    f"{avg_crisis:.0f}%",
+                    f"+{(avg_crisis/avg_normal - 1)*100:.0f}% vs normal"
+                )
+            
+            with col3:
+                if 'VIX' in macro_data.columns:
+                    monthly_vix = macro_data.resample('M')['VIX'].mean()
+                    correlation_data = monthly_stats.set_index('date').join(monthly_vix, how='inner')
+                    if len(correlation_data) > 10:
+                        corr = correlation_data['Mortalidad'].corr(correlation_data['VIX'])
+                        st.metric(
+                            "Correlación con VIX",
+                            f"{corr:.3f}",
+                            "Correlación positiva" if corr > 0 else "Correlación negativa"
+                        )
+    
+    elif view_type == "Flujos de Fondos":
+        # Create waterfall chart showing cumulative effect
+        fig = go.Figure()
         
-        # Update layout with dark theme
+        # Prepare yearly data for waterfall
+        yearly_data = monthly_stats.groupby('year').agg({
+            'Altas': 'sum',
+            'Bajas': 'sum',
+            'Balance': 'sum'
+        }).reset_index()
+        
+        # Create measure column for waterfall
+        measures = []
+        for _, row in yearly_data.iterrows():
+            if row['Balance'] >= 0:
+                measures.append('relative')
+            else:
+                measures.append('relative')
+        
+        # Add a total at the end
+        total_balance = yearly_data['Balance'].sum()
+        
+        fig.add_trace(go.Waterfall(
+            x=yearly_data['year'].astype(str).tolist() + ['Total'],
+            y=yearly_data['Balance'].tolist() + [None],
+            measure=measures + ['total'],
+            text=[f"{v:+}" for v in yearly_data['Balance']] + [f"{total_balance:+}"],
+            textposition="outside",
+            increasing={"marker": {"color": "rgba(34, 197, 94, 0.8)"}},
+            decreasing={"marker": {"color": "rgba(239, 68, 68, 0.8)"}},
+            totals={"marker": {"color": "rgba(99, 102, 241, 0.8)"}},
+            connector={"line": {"color": "rgba(255, 255, 255, 0.2)"}},
+            name="Balance Anual"
+        ))
+        
         fig.update_layout(
-            height=900,
-            plot_bgcolor='#0f0f0f',
+            title="Flujo Acumulado de Fondos: El Sesgo se Construye Año a Año",
+            xaxis_title="Año",
+            yaxis_title="Balance Neto de Fondos",
+            height=500,
+            plot_bgcolor='#1a1a1a',
             paper_bgcolor='#0f0f0f',
-            font=dict(family='Inter', color='#e2e8f0', size=10),
-            hovermode='x unified',
-            hoverlabel=dict(
-                bgcolor='rgba(26, 26, 26, 0.95)',
-                font_size=11,
-                font_family='Inter',
-                bordercolor='rgba(99, 102, 241, 0.3)'
-            ),
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-                bgcolor='rgba(26, 26, 26, 0.8)',
-                bordercolor='rgba(99, 102, 241, 0.2)',
-                borderwidth=1,
-                font=dict(size=10)
-            ),
-            margin=dict(t=80, b=60, l=80, r=80)
+            font=dict(family='Inter', color='#e2e8f0'),
+            showlegend=False
         )
         
-        # Update all x-axes
-        fig.update_xaxes(
-            gridcolor='rgba(255, 255, 255, 0.03)',
-            showgrid=True,
-            zeroline=False,
-            tickfont=dict(size=9, color='#64748b'),
-            showticklabels=False,
-            row=1, col=1
-        )
-        fig.update_xaxes(
-            gridcolor='rgba(255, 255, 255, 0.03)',
-            showgrid=True,
-            zeroline=False,
-            tickfont=dict(size=9, color='#64748b'),
-            showticklabels=False,
-            row=2, col=1
-        )
-        fig.update_xaxes(
-            gridcolor='rgba(255, 255, 255, 0.03)',
-            showgrid=True,
-            zeroline=False,
-            tickfont=dict(size=9, color='#64748b'),
-            showticklabels=False,
-            row=3, col=1
-        )
-        fig.update_xaxes(
-            gridcolor='rgba(255, 255, 255, 0.03)',
-            showgrid=True,
-            zeroline=False,
-            tickfont=dict(size=9, color='#64748b'),
-            showticklabels=False,
-            row=4, col=1
-        )
-        fig.update_xaxes(
-            gridcolor='rgba(255, 255, 255, 0.03)',
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=9, color='#64748b'),
-            showticklabels=True,
-            row=5, col=1
-        )
-        
-        # Update y-axes with proper titles
-        fig.update_yaxes(title_text="S&P 500 ($)", row=1, col=1, secondary_y=False,
-                        gridcolor='rgba(255, 255, 255, 0.03)', tickfont=dict(size=9))
-        fig.update_yaxes(title_text="Mortalidad (%)", row=1, col=1, secondary_y=True,
-                        gridcolor='rgba(255, 255, 255, 0.03)', tickfont=dict(size=9))
-        fig.update_yaxes(title_text="VIX", row=2, col=1,
-                        gridcolor='rgba(255, 255, 255, 0.03)', tickfont=dict(size=9))
-        fig.update_yaxes(title_text="Desempleo (%)", row=3, col=1,
-                        gridcolor='rgba(255, 255, 255, 0.03)', tickfont=dict(size=9))
-        fig.update_yaxes(title_text="Balance", row=4, col=1,
-                        gridcolor='rgba(255, 255, 255, 0.03)', tickfont=dict(size=9))
-        fig.update_yaxes(title_text="", row=5, col=1, showticklabels=False,
-                        gridcolor='rgba(255, 255, 255, 0.03)')
-        
-        # Update subplot titles styling
-        for annotation in fig['layout']['annotations'][:5]:
-            annotation['font'] = dict(size=11, color='#cbd5e1', family='Inter')
-            annotation['y'] = annotation['y'] + 0.01
+        fig.update_xaxes(gridcolor='#333')
+        fig.update_yaxes(gridcolor='#333')
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Economic cycle insights with correlation analysis
-        st.markdown("### 📊 Análisis de Correlaciones y Ciclos")
-        
-        # Calculate correlations
+        # Summary statistics
         col1, col2, col3, col4 = st.columns(4)
         
-        if 'VIX' in macro_data.columns:
-            # Merge data for correlation
-            monthly_vix = macro_data.resample('M')['VIX'].mean()
-            correlation_data = monthly_stats.set_index('date').join(monthly_vix, how='inner')
-            
-            if len(correlation_data) > 10:
-                vix_mortality_corr = correlation_data['Mortalidad'].corr(correlation_data['VIX'])
-                
-                with col1:
-                    color = '#ef4444' if vix_mortality_corr > 0.5 else '#fbbf24' if vix_mortality_corr > 0.3 else '#22c55e'
-                    st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); 
-                                padding: 1rem; border-radius: 12px; text-align: center;
-                                border: 1px solid rgba(99, 102, 241, 0.2);">
-                        <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem;">
-                            VIX ↔ Mortalidad
-                        </div>
-                        <div style="font-size: 2rem; font-weight: bold; color: {color};">
-                            {vix_mortality_corr:.3f}
-                        </div>
-                        <div style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-                            Correlación {'Fuerte' if abs(vix_mortality_corr) > 0.5 else 'Moderada' if abs(vix_mortality_corr) > 0.3 else 'Débil'}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
-        if 'Spain_Unemployment' in macro_data.columns:
-            monthly_unemployment = macro_data.resample('M')['Spain_Unemployment'].mean()
-            correlation_data = monthly_stats.set_index('date').join(monthly_unemployment, how='inner')
-            
-            if len(correlation_data) > 10:
-                unemployment_mortality_corr = correlation_data['Mortalidad'].corr(correlation_data['Spain_Unemployment'])
-                
-                with col2:
-                    color = '#ef4444' if unemployment_mortality_corr > 0.5 else '#fbbf24' if unemployment_mortality_corr > 0.3 else '#22c55e'
-                    st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.1)); 
-                                padding: 1rem; border-radius: 12px; text-align: center;
-                                border: 1px solid rgba(239, 68, 68, 0.2);">
-                        <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem;">
-                            Desempleo ↔ Mortalidad
-                        </div>
-                        <div style="font-size: 2rem; font-weight: bold; color: {color};">
-                            {unemployment_mortality_corr:.3f}
-                        </div>
-                        <div style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-                            Correlación {'Fuerte' if abs(unemployment_mortality_corr) > 0.5 else 'Moderada' if abs(unemployment_mortality_corr) > 0.3 else 'Débil'}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
-        # Crisis impact metrics
-        with col3:
-            crisis_years = [2008, 2009, 2010, 2011, 2012, 2020]
-            crisis_deaths = deaths[deaths['year'].isin(crisis_years)]
-            normal_deaths = deaths[~deaths['year'].isin(crisis_years)]
-            
-            crisis_rate = len(crisis_deaths) / len(deaths) * 100 if len(deaths) > 0 else 0
-            
-            st.markdown(f"""
-            <div style="background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.1)); 
-                        padding: 1rem; border-radius: 12px; text-align: center;
-                        border: 1px solid rgba(251, 191, 36, 0.2);">
-                <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem;">
-                    Impacto de Crisis
-                </div>
-                <div style="font-size: 2rem; font-weight: bold; color: #fbbf24;">
-                    {crisis_rate:.1f}%
-                </div>
-                <div style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-                    Muertes en crisis
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            # Average mortality by phase
-            crisis_mortality = monthly_stats[monthly_stats['year'].isin(crisis_years)]['Mortalidad'].mean()
-            normal_mortality = monthly_stats[~monthly_stats['year'].isin(crisis_years)]['Mortalidad'].mean()
-            mortality_increase = ((crisis_mortality / normal_mortality - 1) * 100) if normal_mortality > 0 else 0
-            
-            st.markdown(f"""
-            <div style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(22, 163, 74, 0.1)); 
-                        padding: 1rem; border-radius: 12px; text-align: center;
-                        border: 1px solid rgba(34, 197, 94, 0.2);">
-                <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem;">
-                    ↑ Mortalidad en Crisis
-                </div>
-                <div style="font-size: 2rem; font-weight: bold; color: #ef4444;">
-                    +{mortality_increase:.0f}%
-                </div>
-                <div style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-                    vs. períodos normales
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Cycle Phase Analysis
-        st.markdown("### 🔄 Características por Fase del Ciclo")
-        
-        col1, col2 = st.columns(2)
-        
         with col1:
-            st.markdown("""
-            <div style="background: rgba(239, 68, 68, 0.05); padding: 1.5rem; border-radius: 12px; 
-                        border-left: 4px solid #ef4444;">
-                <h4 style="color: #ef4444; margin-bottom: 1rem;">📉 FASES DE RECESIÓN</h4>
-                <ul style="color: #e2e8f0; line-height: 1.8;">
-                    <li><strong>VIX > 30:</strong> Pánico en mercados</li>
-                    <li><strong>Mortalidad:</strong> Picos del 200-500%</li>
-                    <li><strong>Balance:</strong> Fuertemente negativo</li>
-                    <li><strong>Desempleo:</strong> Tendencia alcista</li>
-                    <li><strong>Duración media:</strong> 9-12 meses</li>
-                </ul>
-                <p style="color: #94a3b8; margin-top: 1rem; font-size: 0.85rem;">
-                    Los fondos nacidos en estas fases tienen 40% menos esperanza de vida
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-        
+            st.metric("Total Creados", f"{yearly_data['Altas'].sum():,}")
         with col2:
-            st.markdown("""
-            <div style="background: rgba(34, 197, 94, 0.05); padding: 1.5rem; border-radius: 12px; 
-                        border-left: 4px solid #22c55e;">
-                <h4 style="color: #22c55e; margin-bottom: 1rem;">📈 FASES DE EXPANSIÓN</h4>
-                <ul style="color: #e2e8f0; line-height: 1.8;">
-                    <li><strong>VIX < 20:</strong> Complacencia del mercado</li>
-                    <li><strong>Mortalidad:</strong> Estable 50-100%</li>
-                    <li><strong>Balance:</strong> Generalmente positivo</li>
-                    <li><strong>Desempleo:</strong> Tendencia bajista</li>
-                    <li><strong>Duración media:</strong> 5-7 años</li>
-                </ul>
-                <p style="color: #94a3b8; margin-top: 1rem; font-size: 0.85rem;">
-                    Mayor creación de fondos pero con menor diferenciación
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Key Insight Box
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); 
-                    padding: 2rem; border-radius: 16px; margin-top: 2rem;
-                    border: 1px solid rgba(99, 102, 241, 0.2);">
-            <h3 style="color: #a5b4fc; margin-bottom: 1rem;">🎯 Insight Clave: El Sesgo de Supervivencia es Cíclico</h3>
-            <p style="color: #e2e8f0; line-height: 1.8; font-size: 1rem;">
-                El análisis revela que <strong>el sesgo de supervivencia no es constante</strong>, sino que se amplifica 
-                dramáticamente durante las crisis económicas. Durante la Crisis Financiera de 2008-2009, la mortalidad 
-                de fondos alcanzó picos del <strong>500%</strong> (5 bajas por cada alta), mientras que en períodos de 
-                expansión se mantiene en torno al <strong>50-100%</strong>.
-            </p>
-            <p style="color: #cbd5e1; margin-top: 1rem; line-height: 1.8;">
-                Esta correlación entre volatilidad (VIX) y mortalidad de fondos ({vix_mortality_corr:.3f}) sugiere que 
-                <strong>los inversores que solo observan fondos supervivientes están viendo una imagen especialmente 
-                distorsionada</strong> de los períodos de crisis, donde precisamente más necesitan información precisa.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+            st.metric("Total Liquidados", f"{yearly_data['Bajas'].sum():,}")
+        with col3:
+            st.metric("Balance Total", f"{total_balance:+,}")
+        with col4:
+            survival_rate = (1 - yearly_data['Bajas'].sum() / yearly_data['Altas'].sum()) * 100
+            st.metric("Tasa Supervivencia", f"{survival_rate:.1f}%")
     
-    else:
-        st.warning("No se pudieron cargar los datos macroeconómicos. Verifica la conexión a internet.")
-# Tab 3: Enhanced Temporal Analysis
+    else:  # Análisis de Crisis
+        # Create focused crisis analysis
+        crisis_periods = [
+            {"name": "Pre-Crisis", "start": "2004-01-01", "end": "2008-08-31", "type": "normal"},
+            {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-12-31", "type": "crisis"},
+            {"name": "Recuperación", "start": "2010-01-01", "end": "2011-07-31", "type": "recovery"},
+            {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-12-31", "type": "crisis"},
+            {"name": "Expansión", "start": "2013-01-01", "end": "2019-12-31", "type": "normal"},
+            {"name": "COVID-19", "start": "2020-01-01", "end": "2020-12-31", "type": "crisis"},
+            {"name": "Post-COVID", "start": "2021-01-01", "end": "2025-12-31", "type": "recovery"}
+        ]
+        
+        # Calculate metrics for each period
+        period_data = []
+        for period in crisis_periods:
+            mask = (monthly_stats['date'] >= period['start']) & (monthly_stats['date'] <= period['end'])
+            period_stats = monthly_stats[mask]
+            
+            if len(period_stats) > 0:
+                period_data.append({
+                    'Período': period['name'],
+                    'Tipo': period['type'],
+                    'Altas': period_stats['Altas'].sum(),
+                    'Bajas': period_stats['Bajas'].sum(),
+                    'Balance': period_stats['Balance'].sum(),
+                    'Mortalidad_Media': period_stats['Mortalidad'].mean(),
+                    'Mortalidad_Max': period_stats['Mortalidad'].max()
+                })
+        
+        period_df = pd.DataFrame(period_data)
+        
+        # Create grouped bar chart
+        fig = go.Figure()
+        
+        colors_map = {
+            'crisis': '#ef4444',
+            'normal': '#22c55e',
+            'recovery': '#6366f1'
+        }
+        
+        fig.add_trace(go.Bar(
+            x=period_df['Período'],
+            y=period_df['Mortalidad_Media'],
+            name='Mortalidad Media',
+            marker_color=[colors_map[t] for t in period_df['Tipo']],
+            text=period_df['Mortalidad_Media'].round(0),
+            textposition='outside',
+            texttemplate='%{text}%',
+            hovertemplate='<b>%{x}</b><br>Mortalidad Media: %{y:.1f}%<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title="Impacto de las Crisis: La Mortalidad se Multiplica",
+            xaxis_title="",
+            yaxis_title="Tasa de Mortalidad Media (%)",
+            height=500,
+            plot_bgcolor='#1a1a1a',
+            paper_bgcolor='#0f0f0f',
+            font=dict(family='Inter', color='#e2e8f0'),
+            showlegend=False
+        )
+        
+        fig.update_xaxes(gridcolor='#333', tickangle=45)
+        fig.update_yaxes(gridcolor='#333')
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Period comparison table
+        st.markdown("#### 📊 Comparación Detallada por Período")
+        
+        display_df = period_df.copy()
+        display_df['Mortalidad_Media'] = display_df['Mortalidad_Media'].round(1)
+        display_df['Mortalidad_Max'] = display_df['Mortalidad_Max'].round(0)
+        display_df['Tipo'] = display_df['Tipo'].map({
+            'crisis': '🔴 Crisis',
+            'normal': '🟢 Normal',
+            'recovery': '🔵 Recuperación'
+        })
+        
+        st.dataframe(
+            display_df[['Período', 'Tipo', 'Altas', 'Bajas', 'Balance', 'Mortalidad_Media', 'Mortalidad_Max']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Período": st.column_config.TextColumn("Período", width="medium"),
+                "Tipo": st.column_config.TextColumn("Tipo", width="small"),
+                "Altas": st.column_config.NumberColumn("Altas", format="%d"),
+                "Bajas": st.column_config.NumberColumn("Bajas", format="%d"),
+                "Balance": st.column_config.NumberColumn("Balance", format="%+d"),
+                "Mortalidad_Media": st.column_config.NumberColumn("Mortalidad Media %", format="%.1f%%"),
+                "Mortalidad_Max": st.column_config.NumberColumn("Mortalidad Máx %", format="%.0f%%")
+            }
+        )
+    
+    # Simple key insight at bottom
+    st.markdown("""
+    <div style="background: rgba(99, 102, 241, 0.1); 
+                padding: 1.5rem; 
+                border-radius: 12px; 
+                margin-top: 2rem;
+                border-left: 4px solid #6366f1;">
+        <h4 style="color: #a5b4fc; margin-bottom: 0.5rem;">💡 El Sesgo Oculto</h4>
+        <p style="color: #e2e8f0; line-height: 1.6;">
+            Durante las crisis económicas, la mortalidad de fondos puede superar el 500% (5 bajas por cada alta). 
+            Los inversores que solo ven los fondos supervivientes pierden esta información crítica sobre el riesgo real del mercado.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
 with tab_list[2]:
     st.markdown("### 📈 Evolución Temporal del Sesgo de Supervivencia")
     
