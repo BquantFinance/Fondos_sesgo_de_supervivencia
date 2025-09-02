@@ -1068,84 +1068,506 @@ with tab_list[1]:
             </div>
             """, unsafe_allow_html=True)
 
-# Tab 3: Temporal Analysis
+# Tab 3: Enhanced Temporal Analysis
 with tab_list[2]:
-    st.markdown("### Evolución Temporal del Sesgo")
+    st.markdown("### 📈 Evolución Temporal del Sesgo de Supervivencia")
     
-    # Prepare yearly data
-    yearly_stats = df.groupby(['year', 'status']).size().unstack(fill_value=0)
-    yearly_stats = yearly_stats.rename(columns={
-        'NUEVAS_INSCRIPCIONES': 'Altas',
-        'BAJAS': 'Bajas'
-    })
-    yearly_stats['Cambio_Neto'] = yearly_stats['Altas'] - yearly_stats['Bajas']
-    yearly_stats = yearly_stats.reset_index()
+    # Time granularity selector
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
     
-    # Create dark mode chart
+    with col1:
+        time_granularity = st.selectbox(
+            "📅 Granularidad Temporal",
+            options=['Semanal', 'Mensual', 'Trimestral', 'Anual'],
+            index=3,  # Default to Annual
+            help="Selecciona el período de agregación para el análisis"
+        )
+    
+    with col2:
+        chart_type = st.selectbox(
+            "📊 Tipo de Gráfico",
+            options=['Barras Apiladas', 'Líneas', 'Área', 'Cascada'],
+            index=0,
+            help="Selecciona el tipo de visualización"
+        )
+    
+    with col3:
+        show_moving_avg = st.checkbox(
+            "📉 Media Móvil",
+            value=True,
+            help="Mostrar media móvil del balance neto"
+        )
+    
+    with col4:
+        if time_granularity != 'Anual':
+            # Year selector for non-annual views
+            available_years = sorted(df['year'].unique())
+            selected_years = st.select_slider(
+                "Rango de Años",
+                options=available_years,
+                value=(max(available_years)-5, max(available_years)),
+                help="Selecciona el rango de años a visualizar"
+            )
+        else:
+            selected_years = None
+    
+    # Prepare data based on granularity
+    if time_granularity == 'Semanal':
+        # Weekly aggregation
+        df_temp = df.copy()
+        df_temp['week'] = df_temp['date'].dt.to_period('W')
+        
+        if selected_years:
+            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
+        
+        temporal_stats = df_temp.groupby(['week', 'status']).size().unstack(fill_value=0)
+        temporal_stats.index = temporal_stats.index.to_timestamp()
+        time_label = "Semana"
+        ma_window = 4  # 4-week moving average
+        
+    elif time_granularity == 'Mensual':
+        # Monthly aggregation
+        df_temp = df.copy()
+        
+        if selected_years:
+            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
+        
+        temporal_stats = df_temp.groupby(['year_month', 'status']).size().unstack(fill_value=0)
+        temporal_stats.index = temporal_stats.index.to_timestamp()
+        time_label = "Mes"
+        ma_window = 3  # 3-month moving average
+        
+    elif time_granularity == 'Trimestral':
+        # Quarterly aggregation
+        df_temp = df.copy()
+        df_temp['quarter'] = df_temp['date'].dt.to_period('Q')
+        
+        if selected_years:
+            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
+        
+        temporal_stats = df_temp.groupby(['quarter', 'status']).size().unstack(fill_value=0)
+        temporal_stats.index = temporal_stats.index.to_timestamp()
+        time_label = "Trimestre"
+        ma_window = 4  # 4-quarter moving average
+        
+    else:  # Annual
+        # Yearly aggregation
+        temporal_stats = df.groupby(['year', 'status']).size().unstack(fill_value=0)
+        temporal_stats.index = pd.to_datetime(temporal_stats.index.astype(str) + '-01-01')
+        time_label = "Año"
+        ma_window = 2  # 2-year moving average
+    
+    # Rename columns for consistency
+    if 'NUEVAS_INSCRIPCIONES' in temporal_stats.columns:
+        temporal_stats = temporal_stats.rename(columns={
+            'NUEVAS_INSCRIPCIONES': 'Altas',
+            'BAJAS': 'Bajas'
+        })
+    
+    # Calculate additional metrics
+    temporal_stats['Balance_Neto'] = temporal_stats.get('Altas', 0) - temporal_stats.get('Bajas', 0)
+    temporal_stats['Mortalidad_%'] = (temporal_stats.get('Bajas', 0) / temporal_stats.get('Altas', 1) * 100).fillna(0)
+    temporal_stats['Acumulado'] = temporal_stats['Balance_Neto'].cumsum()
+    
+    # Calculate moving average if requested
+    if show_moving_avg:
+        temporal_stats['MA_Balance'] = temporal_stats['Balance_Neto'].rolling(window=ma_window, center=True).mean()
+    
+    # Create the main visualization
     fig = go.Figure()
     
-    # Births
-    fig.add_trace(go.Bar(
-        x=yearly_stats['year'],
-        y=yearly_stats['Altas'],
-        name='Altas',
-        marker_color='#22c55e',
-        text=yearly_stats['Altas'],
-        textposition='outside',
-        textfont=dict(color='#22c55e'),
-        hovertemplate='<b>%{x}</b><br>Altas: %{y}<extra></extra>'
-    ))
+    if chart_type == 'Barras Apiladas':
+        # Stacked bar chart with gradient colors
+        fig.add_trace(go.Bar(
+            x=temporal_stats.index,
+            y=temporal_stats.get('Altas', 0),
+            name='🟢 Altas',
+            marker=dict(
+                color='rgba(34, 197, 94, 0.9)',
+                line=dict(color='rgba(34, 197, 94, 1)', width=1),
+                pattern=dict(shape="", fgcolor="rgba(34, 197, 94, 0.1)")
+            ),
+            text=temporal_stats.get('Altas', 0),
+            textposition='outside',
+            textfont=dict(color='#22c55e', size=10),
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
+        ))
+        
+        fig.add_trace(go.Bar(
+            x=temporal_stats.index,
+            y=-temporal_stats.get('Bajas', 0),
+            name='🔴 Bajas',
+            marker=dict(
+                color='rgba(239, 68, 68, 0.9)',
+                line=dict(color='rgba(239, 68, 68, 1)', width=1),
+                pattern=dict(shape="", fgcolor="rgba(239, 68, 68, 0.1)")
+            ),
+            text=temporal_stats.get('Bajas', 0),
+            textposition='outside',
+            textfont=dict(color='#ef4444', size=10),
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
+        ))
+        
+        # Add balance line
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats['Balance_Neto'],
+            name='⚡ Balance Neto',
+            line=dict(color='#fbbf24', width=3, shape='spline'),
+            mode='lines+markers',
+            marker=dict(
+                size=8,
+                color='#fbbf24',
+                line=dict(width=2, color='#1a1a1a'),
+                symbol='diamond'
+            ),
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Balance: %{y:+}<extra></extra>'
+        ))
+        
+    elif chart_type == 'Líneas':
+        # Enhanced line chart
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats.get('Altas', 0),
+            name='🟢 Altas',
+            line=dict(color='#22c55e', width=3, shape='spline'),
+            mode='lines+markers',
+            marker=dict(size=6, color='#22c55e'),
+            fill='tozeroy',
+            fillcolor='rgba(34, 197, 94, 0.1)',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats.get('Bajas', 0),
+            name='🔴 Bajas',
+            line=dict(color='#ef4444', width=3, shape='spline'),
+            mode='lines+markers',
+            marker=dict(size=6, color='#ef4444'),
+            fill='tozeroy',
+            fillcolor='rgba(239, 68, 68, 0.1)',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats['Balance_Neto'],
+            name='⚡ Balance',
+            line=dict(color='#fbbf24', width=2, dash='dot'),
+            mode='lines',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Balance: %{y:+}<extra></extra>'
+        ))
+        
+    elif chart_type == 'Área':
+        # Area chart with gradient
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats.get('Altas', 0),
+            name='🟢 Altas',
+            stackgroup='one',
+            fillcolor='rgba(34, 197, 94, 0.4)',
+            line=dict(color='#22c55e', width=2),
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=-temporal_stats.get('Bajas', 0),
+            name='🔴 Bajas',
+            stackgroup='one',
+            fillcolor='rgba(239, 68, 68, 0.4)',
+            line=dict(color='#ef4444', width=2),
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
+        ))
+        
+    else:  # Cascada (Waterfall)
+        # Waterfall chart for cumulative effect
+        fig.add_trace(go.Waterfall(
+            x=temporal_stats.index,
+            y=temporal_stats['Balance_Neto'],
+            text=[f"{v:+}" for v in temporal_stats['Balance_Neto']],
+            textposition="outside",
+            connector={"line": {"color": "rgba(99, 102, 241, 0.3)", "width": 1}},
+            increasing={"marker": {"color": "rgba(34, 197, 94, 0.8)"}},
+            decreasing={"marker": {"color": "rgba(239, 68, 68, 0.8)"}},
+            totals={"marker": {"color": "rgba(99, 102, 241, 0.8)"}},
+            name="Balance Acumulado"
+        ))
     
-    # Deaths
-    fig.add_trace(go.Bar(
-        x=yearly_stats['year'],
-        y=-yearly_stats['Bajas'],
-        name='Bajas',
-        marker_color='#ef4444',
-        text=yearly_stats['Bajas'],
-        textposition='outside',
-        textfont=dict(color='#ef4444'),
-        hovertemplate='<b>%{x}</b><br>Bajas: %{y}<extra></extra>'
-    ))
+    # Add moving average if selected
+    if show_moving_avg and 'MA_Balance' in temporal_stats.columns:
+        fig.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats['MA_Balance'],
+            name=f'📊 Media Móvil ({ma_window} {time_label.lower()}s)',
+            line=dict(color='#a78bfa', width=2, dash='dash'),
+            mode='lines',
+            opacity=0.7,
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>MA: %{y:.1f}<extra></extra>'
+        ))
     
-    # Net change line
-    fig.add_trace(go.Scatter(
-        x=yearly_stats['year'],
-        y=yearly_stats['Cambio_Neto'],
-        name='Balance Neto',
-        line=dict(color='#fbbf24', width=3),
-        mode='lines+markers',
-        marker=dict(size=10, color='#fbbf24', line=dict(width=2, color='#1a1a1a')),
-        hovertemplate='<b>%{x}</b><br>Balance: %{y:+}<extra></extra>'
-    ))
+    # Add crisis period annotations
+    crisis_periods = [
+        {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01", "y_pos": 0.9},
+        {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01", "y_pos": 0.85},
+        {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01", "y_pos": 0.8}
+    ]
     
+    for period in crisis_periods:
+        # Only add if within the selected time range
+        if temporal_stats.index[0] <= pd.to_datetime(period["end"]) and temporal_stats.index[-1] >= pd.to_datetime(period["start"]):
+            fig.add_vrect(
+                x0=period["start"],
+                x1=period["end"],
+                fillcolor="rgba(239, 68, 68, 0.08)",
+                layer="below",
+                line=dict(width=0),
+                annotation_text=period["name"],
+                annotation_position="top",
+                annotation_font_color="rgba(239, 68, 68, 0.5)",
+                annotation_font_size=10
+            )
+    
+    # Update layout with dark aesthetic
     fig.update_layout(
-        xaxis_title="",
-        yaxis_title="Número de Fondos",
-        hovermode='x unified',
-        height=500,
-        plot_bgcolor='#1a1a1a',
+        title=dict(
+            text=f"<b>Evolución {time_label}ly del Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
+            font=dict(size=20, color='#f1f5f9'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title="",
+            gridcolor='rgba(255, 255, 255, 0.05)',
+            showgrid=True,
+            zeroline=True,
+            zerolinecolor='rgba(255, 255, 255, 0.1)',
+            tickfont=dict(color='#94a3b8'),
+            rangeslider=dict(
+                visible=False  # Enable range slider for time series
+            ),
+            type='date'
+        ),
+        yaxis=dict(
+            title=f"Número de Fondos",
+            gridcolor='rgba(255, 255, 255, 0.05)',
+            showgrid=True,
+            zeroline=True,
+            zerolinecolor='rgba(255, 255, 255, 0.2)',
+            tickfont=dict(color='#94a3b8'),
+            titlefont=dict(color='#cbd5e1')
+        ),
+        plot_bgcolor='#0f0f0f',
         paper_bgcolor='#0f0f0f',
         font=dict(family='Inter', color='#e2e8f0'),
-        barmode='relative',
+        hovermode='x unified',
+        hoverlabel=dict(
+            bgcolor='rgba(26, 26, 26, 0.95)',
+            font_size=12,
+            font_family='Inter',
+            bordercolor='#333'
+        ),
+        height=600,
         showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
+            yanchor="top",
+            y=1.15,
             xanchor="center",
             x=0.5,
             bgcolor='rgba(26, 26, 26, 0.8)',
-            bordercolor='#333',
-            borderwidth=1
-        )
+            bordercolor='rgba(99, 102, 241, 0.2)',
+            borderwidth=1,
+            font=dict(color='#e2e8f0', size=11)
+        ),
+        margin=dict(t=120, b=60, l=60, r=40),
+        barmode='relative' if chart_type == 'Barras Apiladas' else None
     )
     
-    fig.add_hline(y=0, line_color='#666', line_width=1)
-    fig.update_xaxes(gridcolor='#333', showgrid=False, zeroline=False)
-    fig.update_yaxes(gridcolor='#333', showgrid=True, zeroline=False)
+    # Add horizontal line at y=0
+    fig.add_hline(
+        y=0,
+        line_color='rgba(255, 255, 255, 0.2)',
+        line_width=1,
+        line_dash="dash"
+    )
     
+    # Display the chart
     st.plotly_chart(fig, use_container_width=True)
+    
+    # Key Statistics Below Chart
+    st.markdown("---")
+    
+    # Calculate period statistics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    total_altas = temporal_stats.get('Altas', 0).sum()
+    total_bajas = temporal_stats.get('Bajas', 0).sum()
+    balance_total = total_altas - total_bajas
+    avg_mortality = temporal_stats['Mortalidad_%'].mean()
+    
+    # Find worst period
+    worst_period_idx = temporal_stats['Balance_Neto'].idxmin()
+    worst_period_value = temporal_stats.loc[worst_period_idx, 'Balance_Neto']
+    
+    # Find best period
+    best_period_idx = temporal_stats['Balance_Neto'].idxmax()
+    best_period_value = temporal_stats.loc[best_period_idx, 'Balance_Neto']
+    
+    with col1:
+        st.metric(
+            f"Total Altas ({time_label}s: {len(temporal_stats)})",
+            f"{total_altas:,}",
+            f"Media: {(total_altas/len(temporal_stats)):.1f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Total Bajas",
+            f"{total_bajas:,}",
+            f"Media: {(total_bajas/len(temporal_stats)):.1f}"
+        )
+    
+    with col3:
+        st.metric(
+            "Balance Total",
+            f"{balance_total:+,}",
+            f"{'Positivo' if balance_total > 0 else 'Negativo'}",
+            delta_color="normal" if balance_total > 0 else "inverse"
+        )
+    
+    with col4:
+        st.metric(
+            f"Peor {time_label}",
+            f"{worst_period_value:+.0f}",
+            f"{worst_period_idx.strftime('%Y-%m-%d')}",
+            delta_color="inverse"
+        )
+    
+    with col5:
+        st.metric(
+            f"Mejor {time_label}",
+            f"{best_period_value:+.0f}",
+            f"{best_period_idx.strftime('%Y-%m-%d')}"
+        )
+    
+    # Trend Analysis
+    st.markdown("### 📊 Análisis de Tendencias")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Mortality trend over time
+        fig_mortality = go.Figure()
+        
+        fig_mortality.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats['Mortalidad_%'],
+            mode='lines+markers',
+            name='Tasa de Mortalidad',
+            line=dict(color='#ef4444', width=2, shape='spline'),
+            marker=dict(size=5, color='#ef4444'),
+            fill='tozeroy',
+            fillcolor='rgba(239, 68, 68, 0.1)',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Mortalidad: %{y:.1f}%<extra></extra>'
+        ))
+        
+        # Add average line
+        fig_mortality.add_hline(
+            y=avg_mortality,
+            line_color='#fbbf24',
+            line_width=2,
+            line_dash="dash",
+            annotation_text=f"Media: {avg_mortality:.1f}%",
+            annotation_position="right",
+            annotation_font_color='#fbbf24'
+        )
+        
+        fig_mortality.update_layout(
+            title=f"Evolución de la Tasa de Mortalidad {time_label}ly",
+            xaxis_title="",
+            yaxis_title="Mortalidad (%)",
+            height=350,
+            plot_bgcolor='#0f0f0f',
+            paper_bgcolor='#0f0f0f',
+            font=dict(family='Inter', color='#e2e8f0', size=11),
+            xaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
+            yaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
+            hovermode='x unified',
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_mortality, use_container_width=True)
+    
+    with col2:
+        # Cumulative funds over time
+        fig_cumulative = go.Figure()
+        
+        fig_cumulative.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=temporal_stats['Acumulado'],
+            mode='lines+markers',
+            name='Fondos Acumulados',
+            line=dict(color='#6366f1', width=3, shape='spline'),
+            marker=dict(size=5, color='#6366f1'),
+            fill='tozeroy',
+            fillcolor='rgba(99, 102, 241, 0.1)',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Acumulado: %{y:+}<extra></extra>'
+        ))
+        
+        # Add trend line
+        z = np.polyfit(range(len(temporal_stats)), temporal_stats['Acumulado'], 1)
+        p = np.poly1d(z)
+        
+        fig_cumulative.add_trace(go.Scatter(
+            x=temporal_stats.index,
+            y=p(range(len(temporal_stats))),
+            mode='lines',
+            name='Tendencia',
+            line=dict(color='#22c55e', width=2, dash='dash'),
+            opacity=0.7
+        ))
+        
+        fig_cumulative.update_layout(
+            title=f"Balance Acumulado de Fondos",
+            xaxis_title="",
+            yaxis_title="Balance Acumulado",
+            height=350,
+            plot_bgcolor='#0f0f0f',
+            paper_bgcolor='#0f0f0f',
+            font=dict(family='Inter', color='#e2e8f0', size=11),
+            xaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
+            yaxis=dict(gridcolor='rgba(255, 255, 255, 0.05)', tickfont=dict(color='#94a3b8')),
+            hovermode='x unified',
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=1.1,
+                xanchor="center",
+                x=0.5,
+                bgcolor='rgba(26, 26, 26, 0.8)',
+                bordercolor='#333',
+                borderwidth=1,
+                font=dict(size=10)
+            )
+        )
+        
+        st.plotly_chart(fig_cumulative, use_container_width=True)
+    
+    # Insights box
+    st.markdown("""
+    <div class="info-box" style="margin-top: 2rem;">
+        <h4>💡 Insights Clave del Análisis Temporal</h4>
+        <ul style="margin-left: 1rem;">
+            <li>La granularidad temporal revela patrones ocultos en los datos agregados anuales</li>
+            <li>Los períodos de crisis muestran picos significativos en las liquidaciones</li>
+            <li>La tendencia acumulada indica el sesgo real de supervivencia en el tiempo</li>
+            <li>La mortalidad media varía significativamente según el período analizado</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
