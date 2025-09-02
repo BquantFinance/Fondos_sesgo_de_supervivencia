@@ -1362,8 +1362,7 @@ with tab_list[2]:
             showgrid=True,
             zeroline=True,
             zerolinecolor='rgba(255, 255, 255, 0.2)',
-            tickfont=dict(color='#94a3b8'),
-            titlefont=dict(color='#cbd5e1')
+            tickfont=dict(color='#94a3b8')
         ),
         plot_bgcolor='#0f0f0f',
         paper_bgcolor='#0f0f0f',
