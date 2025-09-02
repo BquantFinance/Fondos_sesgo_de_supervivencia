@@ -337,8 +337,14 @@ st.markdown("""
     Datos CNMV 2004-2025
 </div>
 """, unsafe_allow_html=True)
-# Newsletter Banner - Fixed version
+# Newsletter Banner - Alternative with CSS hover
 st.markdown("""
+<style>
+.newsletter-btn:hover {
+    opacity: 0.9 !important;
+    transform: translateY(-2px);
+}
+</style>
 <div style="background: rgba(99, 102, 241, 0.1); 
             border: 1px solid rgba(99, 102, 241, 0.3);
             padding: 1rem 1.5rem; 
@@ -362,6 +368,7 @@ st.markdown("""
     
     <a href="https://bquantfundlab.substack.com/" 
        target="_blank" 
+       class="newsletter-btn"
        style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); 
               color: white; 
               padding: 0.5rem 1.25rem; 
@@ -375,7 +382,6 @@ st.markdown("""
     
 </div>
 """, unsafe_allow_html=True)
-
 # Key metrics at top
 col1, col2, col3, col4 = st.columns(4)
 
