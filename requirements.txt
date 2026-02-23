@@ -8,3 +8,4 @@ openpyxl
 pandas_datareader
 yfinance
 scipy
+networkx
