@@ -486,8 +486,16 @@ _THREE_JS_TEMPLATE = """
 </div>
 
 <div id="legend">
-  <div class="legend-item"><div class="legend-dot gestora"></div> Gestoras</div>
-  <div class="legend-item"><div class="legend-dot depositaria"></div> Depositarias</div>
+  <div style="display: flex; align-items: center; gap: 8px; opacity: 0.4;">
+    <span style="font-size: 9px; color: rgba(255,255,255,0.5);">MORTALIDAD</span>
+    <div style="display: flex; align-items: center; gap: 3px;">
+      <span style="font-size: 8px; color: #5fa87a;">0%</span>
+      <div style="width: 80px; height: 4px; border-radius: 2px; background: linear-gradient(to right, #5ca87a, #e2a44e, #cc3333);"></div>
+      <span style="font-size: 8px; color: #cc3333;">100%</span>
+    </div>
+  </div>
+  <div class="legend-item" style="margin-left: 12px;"><div class="legend-dot gestora" style="background: rgba(255,255,255,0.4); box-shadow: none; width: 5px; height: 5px;"></div><span style="font-size: 9px;">Gestora</span></div>
+  <div class="legend-item"><div class="legend-dot depositaria" style="background: rgba(255,255,255,0.4); box-shadow: none; width: 7px; height: 7px;"></div><span style="font-size: 9px;">Depositaria</span></div>
 </div>
 
 <div id="controls-hint">
@@ -545,8 +553,41 @@ function createGlowTexture(color, size) {
   return tex;
 }
 
-const glowTexGestora = createGlowTexture('rgba(226,164,78,1)', 128);
-const glowTexDepositaria = createGlowTexture('rgba(110,196,167,1)', 128);
+// Mortality color gradient: green (alive) → amber (mid) → red (dead)
+function mortalityColor(mortality) {
+  const t = Math.max(0, Math.min(1, mortality / 100));
+  let r, g, b;
+  if (t < 0.4) {
+    // Green to amber
+    const s = t / 0.4;
+    r = 0.35 + s * 0.55;  // 0.35 → 0.90
+    g = 0.65 - s * 0.15;  // 0.65 → 0.50
+    b = 0.45 - s * 0.30;  // 0.45 → 0.15
+  } else {
+    // Amber to deep red
+    const s = (t - 0.4) / 0.6;
+    r = 0.90 - s * 0.10;  // 0.90 → 0.80
+    g = 0.50 - s * 0.35;  // 0.50 → 0.15
+    b = 0.15 + s * 0.05;  // 0.15 → 0.20
+  }
+  return { r, g, b };
+}
+
+function mortalityColorCSS(mortality) {
+  const { r, g, b } = mortalityColor(mortality);
+  return `rgba(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)},1)`;
+}
+
+// Pre-generate glow textures for a few mortality levels
+const glowTexCache = {};
+function getGlowTex(mortality) {
+  const bucket = Math.round(mortality / 10) * 10;
+  if (!glowTexCache[bucket]) {
+    glowTexCache[bucket] = createGlowTexture(mortalityColorCSS(bucket), 128);
+  }
+  return glowTexCache[bucket];
+}
+
 const glowTexWhite = createGlowTexture('rgba(255,255,255,1)', 64);
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -673,7 +714,7 @@ scene.add(glowGroup);
 scene.add(nodeGroup);
 scene.add(particleGroup);
 
-// ── Edges ──
+// ── Edges with mortality coloring ──
 const edgeMeshes = [];
 edges.forEach(e => {
   const si = nodeMap[e.source];
@@ -689,10 +730,10 @@ edges.forEach(e => {
   const normW = e.weight / 120;
   const opacity = 0.04 + normW * 0.25;
 
-  // Determine color by dominant node type
-  const isGestoraDominant = (nodes[si].type === 'gestora');
-  const baseColor = isGestoraDominant ? new THREE.Color(0xe2a44e) : new THREE.Color(0x6ec4a7);
-  const edgeColor = baseColor.clone().lerp(new THREE.Color(0x333333), 0.5);
+  // Edge color by mortality of the relationship
+  const eMort = e.mortality !== undefined ? e.mortality : 50;
+  const { r, g, b } = mortalityColor(eMort);
+  const edgeColor = new THREE.Color(r * 0.6, g * 0.6, b * 0.6);
 
   const mat = new THREE.LineBasicMaterial({
     color: edgeColor,
@@ -702,15 +743,13 @@ edges.forEach(e => {
     depthWrite: false
   });
   const line = new THREE.Line(geom, mat);
-  line.userData = { sourceIdx: si, targetIdx: ti, weight: e.weight, baseOpacity: opacity };
+  line.userData = { sourceIdx: si, targetIdx: ti, weight: e.weight, baseOpacity: opacity, mortality: eMort };
   edgeGroup.add(line);
   edgeMeshes.push(line);
 });
 
-// ── Nodes (core spheres) ──
+// ── Nodes colored by mortality ──
 const nodeMeshes = [];
-const gestoraColor = new THREE.Color(0xe2a44e);
-const depositariaColor = new THREE.Color(0x6ec4a7);
 
 nodes.forEach((n, i) => {
   const isGestora = n.type === 'gestora';
@@ -718,8 +757,11 @@ nodes.forEach((n, i) => {
     ? 1.5 + (n.weight / maxWeight) * 5
     : 2 + (n.weight / maxWeight) * 7;
 
+  const mort = n.mortality !== undefined ? n.mortality : 50;
+  const { r, g, b } = mortalityColor(mort);
+
   const geom = new THREE.SphereGeometry(radius, 24, 24);
-  const color = isGestora ? gestoraColor : depositariaColor;
+  const color = new THREE.Color(r, g, b);
   const mat = new THREE.MeshBasicMaterial({
     color: color,
     transparent: true,
@@ -731,12 +773,12 @@ nodes.forEach((n, i) => {
   nodeGroup.add(mesh);
   nodeMeshes.push(mesh);
 
-  // ── Glow sprite ──
+  // ── Glow sprite — colored by mortality ──
   const glowSize = radius * (isGestora ? 10 : 12);
   const spriteMat = new THREE.SpriteMaterial({
-    map: isGestora ? glowTexGestora : glowTexDepositaria,
+    map: getGlowTex(mort),
     transparent: true,
-    opacity: 0.15 + (n.weight / maxWeight) * 0.35,
+    opacity: 0.12 + (n.weight / maxWeight) * 0.30,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -771,17 +813,12 @@ for (let i = 0; i < NUM_PARTICLES; i++) {
   particlePositions[i*3+1] = s.y + (t.y - s.y) * p;
   particlePositions[i*3+2] = s.z + (t.z - s.z) * p;
 
-  // Color based on source type
-  const srcNode = nodes[nodeMap[e.source]];
-  if (srcNode.type === 'gestora') {
-    particleColors[i*3]   = 0.886; // #e2a44e
-    particleColors[i*3+1] = 0.643;
-    particleColors[i*3+2] = 0.306;
-  } else {
-    particleColors[i*3]   = 0.431; // #6ec4a7
-    particleColors[i*3+1] = 0.769;
-    particleColors[i*3+2] = 0.655;
-  }
+  // Color based on edge mortality
+  const eMort = e.mortality !== undefined ? e.mortality : 50;
+  const pColor = mortalityColor(eMort);
+  particleColors[i*3]   = pColor.r;
+  particleColors[i*3+1] = pColor.g;
+  particleColors[i*3+2] = pColor.b;
 }
 
 const particleGeom = new THREE.BufferGeometry();
@@ -931,9 +968,24 @@ renderer.domElement.addEventListener('mousemove', e => {
     // Tooltip
     const tt = tooltip;
     tt.querySelector('.tt-name').textContent = n.id;
-    tt.querySelector('.tt-name').className = 'tt-name ' + (n.type === 'gestora' ? 'gestora-color' : 'depositaria-color');
+    tt.querySelector('.tt-name').style.color = mortalityColorCSS(n.mortality || 50);
     tt.querySelector('.tt-type').textContent = n.type === 'gestora' ? '● Gestora' : '◆ Depositaria';
-    tt.querySelector('.tt-stat').innerHTML = `${n.weight} fondos · ${n.connections} conexiones ponderadas`;
+
+    const mort = n.mortality !== undefined ? n.mortality : 0;
+    const total = n.total || n.weight;
+    const dead = n.dead || 0;
+    const alive = n.alive || 0;
+    const medVida = n.med_vida || 0;
+
+    let mortBar = '';
+    const barW = 100;
+    const deadW = Math.round(mort);
+    mortBar = `<div style="margin: 6px 0 4px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; width: ${barW}px;"><div style="height: 100%; width: ${deadW}%; background: ${mortalityColorCSS(mort)}; border-radius: 2px;"></div></div>`;
+
+    tt.querySelector('.tt-stat').innerHTML =
+      `<b style="font-size: 18px; color: ${mortalityColorCSS(mort)}">${mort.toFixed(0)}%</b> <span style="opacity: 0.5;">mortalidad</span>${mortBar}` +
+      `<span style="opacity: 0.5;">${total} fondos</span> · <span style="color: #5fa87a;">${alive} vivos</span> · <span style="color: #c75d5d;">${dead} liquidados</span>` +
+      (medVida > 0 ? `<br><span style="opacity: 0.5;">Vida mediana:</span> ${medVida.toFixed(1)} años` : '');
     tt.classList.add('visible');
 
     const offsetX = e.clientX + 20;
@@ -1193,30 +1245,76 @@ with tab_network:
                                   help="Filtra vínculos débiles")
 
         @st.cache_data
-        def build_3d_html(_edges_df, min_weight):
+        def build_3d_html(_edges_df, _lifecycle_df, min_weight):
             import json
+
+            # Compute mortality per gestora and depositaria
+            g_mort = _lifecycle_df.groupby('Gestora').agg(
+                total=('N_Registro', 'count'),
+                dead=('Activo', lambda x: (~x).sum()),
+                alive=('Activo', 'sum'),
+                med_vida=('Vida_Anos', lambda x: x.dropna().median())
+            ).reset_index()
+            g_mort['mortality'] = (g_mort['dead'] / g_mort['total'] * 100).round(1)
+            g_mort_map = dict(zip(g_mort['Gestora'], g_mort.to_dict('records')))
+
+            d_mort = _lifecycle_df.groupby('Depositaria').agg(
+                total=('N_Registro', 'count'),
+                dead=('Activo', lambda x: (~x).sum()),
+                alive=('Activo', 'sum'),
+                med_vida=('Vida_Anos', lambda x: x.dropna().median())
+            ).reset_index()
+            d_mort['mortality'] = (d_mort['dead'] / d_mort['total'] * 100).round(1)
+            d_mort_map = dict(zip(d_mort['Depositaria'], d_mort.to_dict('records')))
+
+            # Mortality per edge pair
+            e_mort = _lifecycle_df.groupby(['Gestora', 'Depositaria']).agg(
+                e_total=('N_Registro', 'count'),
+                e_dead=('Activo', lambda x: (~x).sum()),
+            ).reset_index()
+            e_mort['e_mortality'] = (e_mort['e_dead'] / e_mort['e_total'] * 100).round(1)
+            e_mort_map = {(r['Gestora'], r['Depositaria']): r['e_mortality'] for _, r in e_mort.iterrows()}
+
             filt = _edges_df[_edges_df['weight'] >= min_weight]
             nodes_dict = {}
             for _, r in filt.iterrows():
                 g = r['Gestora_short']
                 d = r['Depositaria_short']
                 if g not in nodes_dict:
-                    nodes_dict[g] = {'id': g, 'type': 'gestora', 'weight': 0}
+                    gdata = g_mort_map.get(r['Gestora'], {})
+                    nodes_dict[g] = {
+                        'id': g, 'type': 'gestora', 'weight': 0,
+                        'mortality': float(gdata.get('mortality', 50)),
+                        'total': int(gdata.get('total', 0)),
+                        'dead': int(gdata.get('dead', 0)),
+                        'alive': int(gdata.get('alive', 0)),
+                        'med_vida': round(float(gdata.get('med_vida', 0) or 0), 1),
+                    }
                 if d not in nodes_dict:
-                    nodes_dict[d] = {'id': d, 'type': 'depositaria', 'weight': 0}
+                    ddata = d_mort_map.get(r['Depositaria'], {})
+                    nodes_dict[d] = {
+                        'id': d, 'type': 'depositaria', 'weight': 0,
+                        'mortality': float(ddata.get('mortality', 50)),
+                        'total': int(ddata.get('total', 0)),
+                        'dead': int(ddata.get('dead', 0)),
+                        'alive': int(ddata.get('alive', 0)),
+                        'med_vida': round(float(ddata.get('med_vida', 0) or 0), 1),
+                    }
                 nodes_dict[g]['weight'] += r['weight']
                 nodes_dict[d]['weight'] += r['weight']
 
             node_list = list(nodes_dict.values())
             edge_list = [{'source': r['Gestora_short'], 'target': r['Depositaria_short'],
-                          'weight': int(r['weight'])} for _, r in filt.iterrows()]
+                          'weight': int(r['weight']),
+                          'mortality': round(float(e_mort_map.get((r['Gestora'], r['Depositaria']), 50)), 1)}
+                         for _, r in filt.iterrows()]
 
             data_json = json.dumps({'nodes': node_list, 'edges': edge_list})
 
             html = _THREE_JS_TEMPLATE.replace('__GRAPH_DATA_PLACEHOLDER__', data_json)
             return html, len(node_list), len(edge_list)
 
-        html_3d, n_nodes, n_edges = build_3d_html(net_edges, min_w_3d)
+        html_3d, n_nodes, n_edges = build_3d_html(net_edges, lifecycle, min_w_3d)
         components.html(html_3d, height=800, scrolling=False)
 
     else:
