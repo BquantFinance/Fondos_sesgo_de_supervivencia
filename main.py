@@ -29,8 +29,8 @@ st.set_page_config(
 
 COLORS = {
     'bg':          '#0a0a0a',
-    'surface':     '#141414',
-    'surface2':    '#1a1a1a',
+    'surface':     '#101010',
+    'surface2':    '#151515',
     'border':      'rgba(255,255,255,0.06)',
     'text':        '#e8e4df',
     'text_muted':  '#8a8580',
@@ -44,14 +44,14 @@ COLORS = {
 }
 
 PLOTLY_LAYOUT = dict(
-    plot_bgcolor=COLORS['bg'],
-    paper_bgcolor=COLORS['bg'],
+    plot_bgcolor='rgba(10,10,10,1)',
+    paper_bgcolor='rgba(10,10,10,1)',
     font=dict(family='DM Sans, sans-serif', color=COLORS['text'], size=12),
     hoverlabel=dict(
-        bgcolor='rgba(20,20,20,0.95)',
+        bgcolor='rgba(15,15,15,0.95)',
         font_size=12,
         font_family='DM Sans, sans-serif',
-        bordercolor='rgba(255,255,255,0.1)'
+        bordercolor='rgba(255,255,255,0.06)'
     ),
     margin=dict(t=60, b=40, l=50, r=30),
 )
@@ -79,11 +79,11 @@ st.markdown(f"""
         background: var(--surface);
         padding: 1.4rem 1.6rem;
         border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.03);
         transition: border-color 0.3s ease;
     }}
     [data-testid="metric-container"]:hover {{
-        border-color: rgba(226,164,78,0.25);
+        border-color: rgba(226,164,78,0.15);
     }}
     [data-testid="metric-container"] [data-testid="metric-label"] {{
         color: var(--muted);
@@ -128,7 +128,7 @@ st.markdown(f"""
     .stTabs [data-baseweb="tab-list"] {{
         background: transparent;
         gap: 0;
-        border-bottom: 1px solid rgba(255,255,255,0.06);
+        border-bottom: 1px solid rgba(255,255,255,0.04);
         padding: 0;
     }}
     .stTabs [data-baseweb="tab"] {{
@@ -173,11 +173,11 @@ st.markdown(f"""
     [data-testid="stDataFrame"] {{
         border-radius: 12px;
         overflow: hidden;
-        border: 1px solid rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.03);
     }}
 
     /* ── Misc ── */
-    .stMarkdown hr {{ border-color: rgba(255,255,255,0.06); margin: 2rem 0; }}
+    .stMarkdown hr {{ border-color: rgba(255,255,255,0.04); margin: 2rem 0; }}
     #MainMenu {{visibility: hidden;}}
     footer {{visibility: hidden;}}
     .block-container {{ padding-top: 2rem; max-width: 1300px; }}
@@ -195,6 +195,22 @@ st.markdown(f"""
         text-transform: uppercase;
         color: var(--muted);
         margin-top: 0.4rem;
+    }}
+
+    /* ── 3D Graph seamless blend ── */
+    iframe {{
+        border: none !important;
+        background: {COLORS['bg']} !important;
+        border-radius: 0 !important;
+    }}
+    .stElementContainer:has(iframe) {{
+        margin-left: -4rem !important;
+        margin-right: -4rem !important;
+        margin-top: -1rem !important;
+        margin-bottom: -1rem !important;
+    }}
+    .stElementContainer:has(iframe) iframe {{
+        width: calc(100% + 0px) !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -319,19 +335,45 @@ _THREE_JS_TEMPLATE = """
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #000;
+    background: #0a0a0a;
     overflow: hidden;
     font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
     color: #e8e4df;
   }
   canvas { display: block; }
 
+  /* Vignette fade to app background */
+  #vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    background:
+      radial-gradient(ellipse at center, transparent 40%, rgba(10,10,10,0.4) 75%, #0a0a0a 100%);
+  }
+  #edge-fade-top {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 80px;
+    background: linear-gradient(to bottom, #0a0a0a, transparent);
+    pointer-events: none;
+    z-index: 6;
+  }
+  #edge-fade-bottom {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: linear-gradient(to top, #0a0a0a, transparent);
+    pointer-events: none;
+    z-index: 6;
+  }
+
   /* Tooltip */
   #tooltip {
     position: fixed;
     pointer-events: none;
-    background: rgba(8,8,8,0.92);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(10,10,10,0.92);
+    border: 1px solid rgba(255,255,255,0.06);
     border-radius: 10px;
     padding: 14px 18px;
     font-size: 12px;
@@ -355,102 +397,86 @@ _THREE_JS_TEMPLATE = """
     text-transform: uppercase;
     letter-spacing: 2px;
     margin-bottom: 8px;
-    opacity: 0.6;
+    opacity: 0.5;
   }
   #tooltip .tt-stat {
     font-size: 11px;
-    opacity: 0.75;
+    opacity: 0.65;
   }
   .gestora-color { color: #e2a44e; }
   .depositaria-color { color: #6ec4a7; }
 
-  /* HUD */
-  #hud {
-    position: fixed;
-    top: 24px;
-    left: 28px;
-    z-index: 50;
-  }
-  #hud h1 {
-    font-family: 'Georgia', serif;
-    font-size: 22px;
-    font-weight: 400;
-    letter-spacing: 0.5px;
-    color: #e8e4df;
-    margin-bottom: 4px;
-  }
-  #hud .subtitle {
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.3);
-  }
-
-  /* Legend */
+  /* Legend — bottom left, ultra subtle */
   #legend {
     position: fixed;
-    bottom: 28px;
-    left: 28px;
+    bottom: 20px;
+    left: 24px;
     z-index: 50;
     display: flex;
-    gap: 20px;
-    font-size: 11px;
+    gap: 18px;
+    font-size: 10px;
     letter-spacing: 0.5px;
   }
   .legend-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    opacity: 0.5;
+    gap: 6px;
+    opacity: 0.3;
+    transition: opacity 0.3s;
   }
+  .legend-item:hover { opacity: 0.6; }
   .legend-dot {
-    width: 10px;
-    height: 10px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
   }
-  .legend-dot.gestora { background: #e2a44e; box-shadow: 0 0 12px #e2a44e88; }
-  .legend-dot.depositaria { background: #6ec4a7; box-shadow: 0 0 12px #6ec4a788; }
+  .legend-dot.gestora { background: #e2a44e; box-shadow: 0 0 8px rgba(226,164,78,0.4); }
+  .legend-dot.depositaria { background: #6ec4a7; box-shadow: 0 0 8px rgba(110,196,167,0.4); }
 
-  /* Stats */
+  /* Stats — top right, barely visible */
   #stats {
     position: fixed;
-    top: 24px;
-    right: 28px;
+    top: 16px;
+    right: 20px;
     z-index: 50;
     text-align: right;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.25);
-    line-height: 2;
+    color: rgba(255,255,255,0.12);
+    line-height: 2.2;
   }
-  #stats span { color: rgba(255,255,255,0.6); font-weight: 600; }
+  #stats span { color: rgba(255,255,255,0.3); font-weight: 600; }
 
-  /* Controls hint */
+  /* Controls hint — bottom right, fades out */
   #controls-hint {
     position: fixed;
-    bottom: 28px;
-    right: 28px;
+    bottom: 20px;
+    right: 20px;
     z-index: 50;
-    font-size: 10px;
-    letter-spacing: 1px;
-    color: rgba(255,255,255,0.15);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: rgba(255,255,255,0.1);
     text-align: right;
     line-height: 2;
+    animation: fadeHint 6s ease forwards;
+  }
+  @keyframes fadeHint {
+    0%, 60% { opacity: 1; }
+    100% { opacity: 0; }
   }
 </style>
 </head>
 <body>
 
+<div id="vignette"></div>
+<div id="edge-fade-top"></div>
+<div id="edge-fade-bottom"></div>
+
 <div id="tooltip">
   <div class="tt-name"></div>
   <div class="tt-type"></div>
   <div class="tt-stat"></div>
-</div>
-
-<div id="hud">
-  <h1>Red Financiera CNMV</h1>
-  <div class="subtitle">Gestoras · Depositarias · 2004 — 2025</div>
 </div>
 
 <div id="stats">
@@ -485,12 +511,13 @@ const GRAPH_DATA = __GRAPH_DATA_PLACEHOLDER__;
 const W = window.innerWidth, H = window.innerHeight;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x000000, 0.0012);
+scene.fog = new THREE.FogExp2(0x0a0a0a, 0.0010);
 
 const camera = new THREE.PerspectiveCamera(60, W / H, 1, 10000);
 camera.position.set(0, 0, 500);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setClearColor(0x0a0a0a, 1);
 renderer.setSize(W, H);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -786,10 +813,10 @@ for (let i = 0; i < starCount; i++) {
 }
 starGeom.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
 const starMat = new THREE.PointsMaterial({
-  size: 0.8,
-  color: 0x444444,
+  size: 0.6,
+  color: 0x333333,
   transparent: true,
-  opacity: 0.5,
+  opacity: 0.3,
   blending: THREE.AdditiveBlending,
   depthWrite: false,
   sizeAttenuation: true,
@@ -1190,9 +1217,7 @@ with tab_network:
             return html, len(node_list), len(edge_list)
 
         html_3d, n_nodes, n_edges = build_3d_html(net_edges, min_w_3d)
-        components.html(html_3d, height=750, scrolling=False)
-
-        st.caption(f"{n_nodes} nodos · {n_edges} vínculos · Arrastra para rotar, scroll para zoom, click en nodo para enfocar")
+        components.html(html_3d, height=800, scrolling=False)
 
     else:
         # ── 2D PLOTLY VIEW ──
