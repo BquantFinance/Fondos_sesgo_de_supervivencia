@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -300,6 +301,782 @@ def build_network_data(_df):
     return edges, gestora_sizes, depositaria_sizes
 
 
+_THREE_JS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CNMV Fund Network · 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    color: #e8e4df;
+  }
+  canvas { display: block; }
+
+  /* Tooltip */
+  #tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: rgba(8,8,8,0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 12px;
+    line-height: 1.6;
+    max-width: 320px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    backdrop-filter: blur(16px);
+    z-index: 100;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  }
+  #tooltip.visible { opacity: 1; }
+  #tooltip .tt-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+  }
+  #tooltip .tt-type {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    opacity: 0.6;
+  }
+  #tooltip .tt-stat {
+    font-size: 11px;
+    opacity: 0.75;
+  }
+  .gestora-color { color: #e2a44e; }
+  .depositaria-color { color: #6ec4a7; }
+
+  /* HUD */
+  #hud {
+    position: fixed;
+    top: 24px;
+    left: 28px;
+    z-index: 50;
+  }
+  #hud h1 {
+    font-family: 'Georgia', serif;
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+    color: #e8e4df;
+    margin-bottom: 4px;
+  }
+  #hud .subtitle {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+  }
+
+  /* Legend */
+  #legend {
+    position: fixed;
+    bottom: 28px;
+    left: 28px;
+    z-index: 50;
+    display: flex;
+    gap: 20px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.5;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .legend-dot.gestora { background: #e2a44e; box-shadow: 0 0 12px #e2a44e88; }
+  .legend-dot.depositaria { background: #6ec4a7; box-shadow: 0 0 12px #6ec4a788; }
+
+  /* Stats */
+  #stats {
+    position: fixed;
+    top: 24px;
+    right: 28px;
+    z-index: 50;
+    text-align: right;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.25);
+    line-height: 2;
+  }
+  #stats span { color: rgba(255,255,255,0.6); font-weight: 600; }
+
+  /* Controls hint */
+  #controls-hint {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    z-index: 50;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: rgba(255,255,255,0.15);
+    text-align: right;
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<div id="tooltip">
+  <div class="tt-name"></div>
+  <div class="tt-type"></div>
+  <div class="tt-stat"></div>
+</div>
+
+<div id="hud">
+  <h1>Red Financiera CNMV</h1>
+  <div class="subtitle">Gestoras · Depositarias · 2004 — 2025</div>
+</div>
+
+<div id="stats">
+  Nodos <span id="stat-nodes">0</span><br>
+  Vínculos <span id="stat-edges">0</span><br>
+  Fondos <span id="stat-funds">0</span>
+</div>
+
+<div id="legend">
+  <div class="legend-item"><div class="legend-dot gestora"></div> Gestoras</div>
+  <div class="legend-item"><div class="legend-dot depositaria"></div> Depositarias</div>
+</div>
+
+<div id="controls-hint">
+  Arrastrar para rotar<br>
+  Scroll para zoom<br>
+  Click en nodo para fijar
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════════════════════
+
+const GRAPH_DATA = __GRAPH_DATA_PLACEHOLDER__;
+
+// ═══════════════════════════════════════════════════════════════════════
+// SETUP
+// ═══════════════════════════════════════════════════════════════════════
+
+const W = window.innerWidth, H = window.innerHeight;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x000000, 0.0012);
+
+const camera = new THREE.PerspectiveCamera(60, W / H, 1, 10000);
+camera.position.set(0, 0, 500);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+// ═══════════════════════════════════════════════════════════════════════
+// GLOW TEXTURE GENERATOR
+// ═══════════════════════════════════════════════════════════════════════
+
+function createGlowTexture(color, size) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  g.addColorStop(0.0, color);
+  g.addColorStop(0.15, color);
+  g.addColorStop(0.4, color.replace('1)', '0.3)'));
+  g.addColorStop(0.7, color.replace('1)', '0.06)'));
+  g.addColorStop(1.0, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const glowTexGestora = createGlowTexture('rgba(226,164,78,1)', 128);
+const glowTexDepositaria = createGlowTexture('rgba(110,196,167,1)', 128);
+const glowTexWhite = createGlowTexture('rgba(255,255,255,1)', 64);
+
+// ═══════════════════════════════════════════════════════════════════════
+// BUILD GRAPH
+// ═══════════════════════════════════════════════════════════════════════
+
+const nodes = GRAPH_DATA.nodes;
+const edges = GRAPH_DATA.edges;
+
+// Create node map
+const nodeMap = {};
+nodes.forEach((n, i) => {
+  nodeMap[n.id] = i;
+  // Random initial position in sphere
+  const phi = Math.random() * Math.PI * 2;
+  const theta = Math.acos(2 * Math.random() - 1);
+  const r = 150 + Math.random() * 200;
+  n.x = r * Math.sin(theta) * Math.cos(phi);
+  n.y = r * Math.sin(theta) * Math.sin(phi);
+  n.z = r * Math.cos(theta);
+  n.vx = 0; n.vy = 0; n.vz = 0;
+  n.connections = 0;
+});
+
+// Count connections
+edges.forEach(e => {
+  const si = nodeMap[e.source];
+  const ti = nodeMap[e.target];
+  if (si !== undefined) nodes[si].connections += e.weight;
+  if (ti !== undefined) nodes[ti].connections += e.weight;
+});
+
+const maxWeight = Math.max(...nodes.map(n => n.weight));
+const totalFunds = edges.reduce((s, e) => s + e.weight, 0);
+
+// Update HUD
+document.getElementById('stat-nodes').textContent = nodes.length;
+document.getElementById('stat-edges').textContent = edges.length;
+document.getElementById('stat-funds').textContent = totalFunds;
+
+// ═══════════════════════════════════════════════════════════════════════
+// 3D FORCE SIMULATION
+// ═══════════════════════════════════════════════════════════════════════
+
+function simulate(iterations) {
+  const alpha = 0.3;
+  const repulsion = 8000;
+  const attraction = 0.0004;
+  const damping = 0.85;
+  const centerGravity = 0.002;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Repulsion between all nodes
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dz = nodes[i].z - nodes[j].z;
+        let dist = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1;
+        const force = repulsion / (dist * dist);
+        const fx = dx / dist * force;
+        const fy = dy / dist * force;
+        const fz = dz / dist * force;
+        nodes[i].vx += fx * alpha;
+        nodes[i].vy += fy * alpha;
+        nodes[i].vz += fz * alpha;
+        nodes[j].vx -= fx * alpha;
+        nodes[j].vy -= fy * alpha;
+        nodes[j].vz -= fz * alpha;
+      }
+    }
+
+    // Attraction along edges
+    edges.forEach(e => {
+      const si = nodeMap[e.source];
+      const ti = nodeMap[e.target];
+      if (si === undefined || ti === undefined) return;
+      const s = nodes[si], t = nodes[ti];
+      const dx = t.x - s.x;
+      const dy = t.y - s.y;
+      const dz = t.z - s.z;
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1;
+      const force = dist * attraction * Math.sqrt(e.weight);
+      const fx = dx / dist * force;
+      const fy = dy / dist * force;
+      const fz = dz / dist * force;
+      s.vx += fx * alpha;
+      s.vy += fy * alpha;
+      s.vz += fz * alpha;
+      t.vx -= fx * alpha;
+      t.vy -= fy * alpha;
+      t.vz -= fz * alpha;
+    });
+
+    // Center gravity + apply velocities
+    for (let i = 0; i < nodes.length; i++) {
+      nodes[i].vx -= nodes[i].x * centerGravity;
+      nodes[i].vy -= nodes[i].y * centerGravity;
+      nodes[i].vz -= nodes[i].z * centerGravity;
+      nodes[i].vx *= damping;
+      nodes[i].vy *= damping;
+      nodes[i].vz *= damping;
+      nodes[i].x += nodes[i].vx;
+      nodes[i].y += nodes[i].vy;
+      nodes[i].z += nodes[i].vz;
+    }
+  }
+}
+
+// Run simulation
+simulate(300);
+
+// ═══════════════════════════════════════════════════════════════════════
+// CREATE 3D OBJECTS
+// ═══════════════════════════════════════════════════════════════════════
+
+const nodeGroup = new THREE.Group();
+const edgeGroup = new THREE.Group();
+const glowGroup = new THREE.Group();
+const particleGroup = new THREE.Group();
+
+scene.add(edgeGroup);
+scene.add(glowGroup);
+scene.add(nodeGroup);
+scene.add(particleGroup);
+
+// ── Edges ──
+const edgeMeshes = [];
+edges.forEach(e => {
+  const si = nodeMap[e.source];
+  const ti = nodeMap[e.target];
+  if (si === undefined || ti === undefined) return;
+  const s = nodes[si], t = nodes[ti];
+
+  const points = [
+    new THREE.Vector3(s.x, s.y, s.z),
+    new THREE.Vector3(t.x, t.y, t.z)
+  ];
+  const geom = new THREE.BufferGeometry().setFromPoints(points);
+  const normW = e.weight / 120;
+  const opacity = 0.04 + normW * 0.25;
+
+  // Determine color by dominant node type
+  const isGestoraDominant = (nodes[si].type === 'gestora');
+  const baseColor = isGestoraDominant ? new THREE.Color(0xe2a44e) : new THREE.Color(0x6ec4a7);
+  const edgeColor = baseColor.clone().lerp(new THREE.Color(0x333333), 0.5);
+
+  const mat = new THREE.LineBasicMaterial({
+    color: edgeColor,
+    transparent: true,
+    opacity: opacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const line = new THREE.Line(geom, mat);
+  line.userData = { sourceIdx: si, targetIdx: ti, weight: e.weight, baseOpacity: opacity };
+  edgeGroup.add(line);
+  edgeMeshes.push(line);
+});
+
+// ── Nodes (core spheres) ──
+const nodeMeshes = [];
+const gestoraColor = new THREE.Color(0xe2a44e);
+const depositariaColor = new THREE.Color(0x6ec4a7);
+
+nodes.forEach((n, i) => {
+  const isGestora = n.type === 'gestora';
+  const radius = isGestora
+    ? 1.5 + (n.weight / maxWeight) * 5
+    : 2 + (n.weight / maxWeight) * 7;
+
+  const geom = new THREE.SphereGeometry(radius, 24, 24);
+  const color = isGestora ? gestoraColor : depositariaColor;
+  const mat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.position.set(n.x, n.y, n.z);
+  mesh.userData = { nodeIndex: i, baseRadius: radius };
+  nodeGroup.add(mesh);
+  nodeMeshes.push(mesh);
+
+  // ── Glow sprite ──
+  const glowSize = radius * (isGestora ? 10 : 12);
+  const spriteMat = new THREE.SpriteMaterial({
+    map: isGestora ? glowTexGestora : glowTexDepositaria,
+    transparent: true,
+    opacity: 0.15 + (n.weight / maxWeight) * 0.35,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.position.set(n.x, n.y, n.z);
+  sprite.scale.set(glowSize, glowSize, 1);
+  sprite.userData = { nodeIndex: i };
+  glowGroup.add(sprite);
+});
+
+// ── Flowing particles along edges ──
+const NUM_PARTICLES = 600;
+const particlePositions = new Float32Array(NUM_PARTICLES * 3);
+const particleColors = new Float32Array(NUM_PARTICLES * 3);
+const particleSpeeds = new Float32Array(NUM_PARTICLES);
+const particleEdgeMap = new Uint16Array(NUM_PARTICLES);
+const particleProgress = new Float32Array(NUM_PARTICLES);
+
+const validEdges = edges.filter(e => nodeMap[e.source] !== undefined && nodeMap[e.target] !== undefined);
+
+for (let i = 0; i < NUM_PARTICLES; i++) {
+  const edgeIdx = Math.floor(Math.random() * validEdges.length);
+  particleEdgeMap[i] = edgeIdx;
+  particleProgress[i] = Math.random();
+  particleSpeeds[i] = 0.0008 + Math.random() * 0.003;
+
+  const e = validEdges[edgeIdx];
+  const s = nodes[nodeMap[e.source]];
+  const t = nodes[nodeMap[e.target]];
+  const p = particleProgress[i];
+  particlePositions[i*3]   = s.x + (t.x - s.x) * p;
+  particlePositions[i*3+1] = s.y + (t.y - s.y) * p;
+  particlePositions[i*3+2] = s.z + (t.z - s.z) * p;
+
+  // Color based on source type
+  const srcNode = nodes[nodeMap[e.source]];
+  if (srcNode.type === 'gestora') {
+    particleColors[i*3]   = 0.886; // #e2a44e
+    particleColors[i*3+1] = 0.643;
+    particleColors[i*3+2] = 0.306;
+  } else {
+    particleColors[i*3]   = 0.431; // #6ec4a7
+    particleColors[i*3+1] = 0.769;
+    particleColors[i*3+2] = 0.655;
+  }
+}
+
+const particleGeom = new THREE.BufferGeometry();
+particleGeom.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+particleGeom.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+
+const particleMat = new THREE.PointsMaterial({
+  size: 2.2,
+  map: glowTexWhite,
+  transparent: true,
+  opacity: 0.7,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  vertexColors: true,
+  sizeAttenuation: true,
+});
+
+const particleMesh = new THREE.Points(particleGeom, particleMat);
+particleGroup.add(particleMesh);
+
+// ── Background stars ──
+const starCount = 2000;
+const starGeom = new THREE.BufferGeometry();
+const starPos = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+  starPos[i*3]   = (Math.random() - 0.5) * 4000;
+  starPos[i*3+1] = (Math.random() - 0.5) * 4000;
+  starPos[i*3+2] = (Math.random() - 0.5) * 4000;
+}
+starGeom.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({
+  size: 0.8,
+  color: 0x444444,
+  transparent: true,
+  opacity: 0.5,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  sizeAttenuation: true,
+});
+scene.add(new THREE.Points(starGeom, starMat));
+
+// ═══════════════════════════════════════════════════════════════════════
+// CAMERA CONTROLS (manual orbit)
+// ═══════════════════════════════════════════════════════════════════════
+
+let cameraTheta = 0, cameraPhi = Math.PI / 2, cameraRadius = 500;
+let targetTheta = 0, targetPhi = Math.PI / 2, targetRadius = 500;
+let isDragging = false, lastMouseX = 0, lastMouseY = 0;
+let autoRotate = true;
+let focusedNode = null;
+
+function updateCamera() {
+  cameraTheta += (targetTheta - cameraTheta) * 0.08;
+  cameraPhi += (targetPhi - cameraPhi) * 0.08;
+  cameraRadius += (targetRadius - cameraRadius) * 0.08;
+
+  cameraPhi = Math.max(0.1, Math.min(Math.PI - 0.1, cameraPhi));
+  cameraRadius = Math.max(100, Math.min(1500, cameraRadius));
+
+  camera.position.x = cameraRadius * Math.sin(cameraPhi) * Math.cos(cameraTheta);
+  camera.position.y = cameraRadius * Math.cos(cameraPhi);
+  camera.position.z = cameraRadius * Math.sin(cameraPhi) * Math.sin(cameraTheta);
+  camera.lookAt(0, 0, 0);
+}
+
+renderer.domElement.addEventListener('mousedown', e => {
+  isDragging = true;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  autoRotate = false;
+});
+
+renderer.domElement.addEventListener('mousemove', e => {
+  if (isDragging) {
+    const dx = e.clientX - lastMouseX;
+    const dy = e.clientY - lastMouseY;
+    targetTheta -= dx * 0.005;
+    targetPhi -= dy * 0.005;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  }
+});
+
+renderer.domElement.addEventListener('mouseup', () => {
+  isDragging = false;
+  setTimeout(() => { autoRotate = true; }, 3000);
+});
+
+renderer.domElement.addEventListener('wheel', e => {
+  targetRadius += e.deltaY * 0.5;
+  e.preventDefault();
+}, { passive: false });
+
+// Touch support
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    isDragging = true;
+    lastMouseX = e.touches[0].clientX;
+    lastMouseY = e.touches[0].clientY;
+    autoRotate = false;
+  }
+}, { passive: true });
+
+renderer.domElement.addEventListener('touchmove', e => {
+  if (isDragging && e.touches.length === 1) {
+    const dx = e.touches[0].clientX - lastMouseX;
+    const dy = e.touches[0].clientY - lastMouseY;
+    targetTheta -= dx * 0.005;
+    targetPhi -= dy * 0.005;
+    lastMouseX = e.touches[0].clientX;
+    lastMouseY = e.touches[0].clientY;
+  }
+}, { passive: true });
+
+renderer.domElement.addEventListener('touchend', () => {
+  isDragging = false;
+  setTimeout(() => { autoRotate = true; }, 3000);
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// RAYCASTING / HOVER
+// ═══════════════════════════════════════════════════════════════════════
+
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points = { threshold: 5 };
+const mouse = new THREE.Vector2();
+let hoveredNode = null;
+const tooltip = document.getElementById('tooltip');
+
+renderer.domElement.addEventListener('mousemove', e => {
+  mouse.x = (e.clientX / W) * 2 - 1;
+  mouse.y = -(e.clientY / H) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(nodeMeshes);
+
+  if (intersects.length > 0) {
+    const mesh = intersects[0].object;
+    const idx = mesh.userData.nodeIndex;
+    const n = nodes[idx];
+
+    if (hoveredNode !== idx) {
+      hoveredNode = idx;
+      highlightNode(idx);
+    }
+
+    // Tooltip
+    const tt = tooltip;
+    tt.querySelector('.tt-name').textContent = n.id;
+    tt.querySelector('.tt-name').className = 'tt-name ' + (n.type === 'gestora' ? 'gestora-color' : 'depositaria-color');
+    tt.querySelector('.tt-type').textContent = n.type === 'gestora' ? '● Gestora' : '◆ Depositaria';
+    tt.querySelector('.tt-stat').innerHTML = `${n.weight} fondos · ${n.connections} conexiones ponderadas`;
+    tt.classList.add('visible');
+
+    const offsetX = e.clientX + 20;
+    const offsetY = e.clientY - 10;
+    tt.style.left = Math.min(offsetX, W - 340) + 'px';
+    tt.style.top = Math.min(offsetY, H - 100) + 'px';
+
+    document.body.style.cursor = 'pointer';
+  } else {
+    if (hoveredNode !== null) {
+      unhighlightAll();
+      hoveredNode = null;
+    }
+    tooltip.classList.remove('visible');
+    document.body.style.cursor = 'default';
+  }
+});
+
+renderer.domElement.addEventListener('click', e => {
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(nodeMeshes);
+  if (intersects.length > 0) {
+    const idx = intersects[0].object.userData.nodeIndex;
+    focusOnNode(idx);
+  }
+});
+
+function highlightNode(idx) {
+  // Dim everything
+  nodeMeshes.forEach((m, i) => {
+    if (i === idx) {
+      m.material.opacity = 1;
+      m.scale.setScalar(1.4);
+    } else {
+      m.material.opacity = 0.12;
+      m.scale.setScalar(1);
+    }
+  });
+
+  glowGroup.children.forEach((s, i) => {
+    if (i === idx) {
+      s.material.opacity = 0.8;
+    } else {
+      s.material.opacity = 0.02;
+    }
+  });
+
+  // Highlight connected edges and nodes
+  const connectedNodes = new Set();
+  edgeMeshes.forEach(line => {
+    const { sourceIdx, targetIdx, baseOpacity } = line.userData;
+    if (sourceIdx === idx || targetIdx === idx) {
+      line.material.opacity = Math.min(baseOpacity * 6, 0.8);
+      connectedNodes.add(sourceIdx === idx ? targetIdx : sourceIdx);
+    } else {
+      line.material.opacity = 0.01;
+    }
+  });
+
+  // Bring back connected nodes
+  connectedNodes.forEach(ci => {
+    nodeMeshes[ci].material.opacity = 0.7;
+    nodeMeshes[ci].scale.setScalar(1.1);
+    if (glowGroup.children[ci]) {
+      glowGroup.children[ci].material.opacity = 0.3;
+    }
+  });
+}
+
+function unhighlightAll() {
+  nodeMeshes.forEach((m, i) => {
+    m.material.opacity = 0.9;
+    m.scale.setScalar(1);
+  });
+  glowGroup.children.forEach((s, i) => {
+    const n = nodes[i];
+    if (n) {
+      s.material.opacity = 0.15 + (n.weight / maxWeight) * 0.35;
+    }
+  });
+  edgeMeshes.forEach(line => {
+    line.material.opacity = line.userData.baseOpacity;
+  });
+}
+
+function focusOnNode(idx) {
+  const n = nodes[idx];
+  // Move camera to look at this node from nearby
+  const dist = 200;
+  const dx = n.x, dy = n.y, dz = n.z;
+  const r = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  if (r > 1) {
+    targetTheta = Math.atan2(dz, dx);
+    targetPhi = Math.acos(dy / r);
+    targetRadius = r + dist;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════════════
+
+let time = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  time += 0.016;
+
+  // Auto rotation
+  if (autoRotate) {
+    targetTheta += 0.0008;
+  }
+
+  updateCamera();
+
+  // Animate particles
+  const posArr = particleGeom.attributes.position.array;
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    particleProgress[i] += particleSpeeds[i];
+    if (particleProgress[i] > 1) {
+      particleProgress[i] = 0;
+      // Optionally reassign to different edge
+      if (Math.random() < 0.3) {
+        particleEdgeMap[i] = Math.floor(Math.random() * validEdges.length);
+      }
+    }
+
+    const e = validEdges[particleEdgeMap[i]];
+    const s = nodes[nodeMap[e.source]];
+    const t = nodes[nodeMap[e.target]];
+    const p = particleProgress[i];
+
+    // Smooth step for nicer flow
+    const sp = p * p * (3 - 2 * p);
+    posArr[i*3]   = s.x + (t.x - s.x) * sp;
+    posArr[i*3+1] = s.y + (t.y - s.y) * sp;
+    posArr[i*3+2] = s.z + (t.z - s.z) * sp;
+  }
+  particleGeom.attributes.position.needsUpdate = true;
+
+  // Gentle node pulse
+  nodeMeshes.forEach((m, i) => {
+    if (hoveredNode === null) {
+      const pulse = 1 + Math.sin(time * 1.5 + i * 0.5) * 0.03;
+      m.scale.setScalar(pulse);
+    }
+  });
+
+  // Gentle glow pulse
+  glowGroup.children.forEach((s, i) => {
+    if (hoveredNode === null && nodes[i]) {
+      const base = 0.15 + (nodes[i].weight / maxWeight) * 0.35;
+      const pulse = base + Math.sin(time * 1.2 + i * 0.3) * 0.04;
+      s.material.opacity = pulse;
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ═══════════════════════════════════════════════════════════════════════
+// RESIZE
+// ═══════════════════════════════════════════════════════════════════════
+
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+</script>
+</body>
+</html>
+
+"""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD
 # ─────────────────────────────────────────────────────────────────────────────
@@ -368,190 +1145,232 @@ with tab_network:
     </p>
     """, unsafe_allow_html=True)
 
-    # Controls
-    nc1, nc2, nc3 = st.columns([1, 1, 2])
-    with nc1:
-        min_edge_weight = st.slider("Mín. fondos por vínculo", 1, 30, 3,
-                                     help="Filtra relaciones con pocos fondos para simplificar el grafo")
-    with nc2:
-        layout_algo = st.selectbox("Layout", ['spring', 'kamada_kawai'], index=0)
+    # View mode selector
+    nc0, nc1, nc2, nc3 = st.columns([1, 1, 1, 1])
+    with nc0:
+        view_mode = st.selectbox("Vista", ['3D Interactivo', '2D Analítico'], index=0,
+                                  help="3D: Three.js inmersivo · 2D: Plotly con métricas de red")
 
-    # Build networkx graph
-    filtered_edges = net_edges[net_edges['weight'] >= min_edge_weight]
-
-    G = nx.Graph()
-    for _, row in filtered_edges.iterrows():
-        g_node = f"G|{row['Gestora_short']}"
-        d_node = f"D|{row['Depositaria_short']}"
-        G.add_node(g_node, node_type='gestora', full_name=row['Gestora'],
-                   size=gestora_sizes.get(row['Gestora_short'], 1))
-        G.add_node(d_node, node_type='depositaria', full_name=row['Depositaria'],
-                   size=depositaria_sizes.get(row['Depositaria_short'], 1))
-        G.add_edge(g_node, d_node, weight=row['weight'],
-                   funds=', '.join(row['funds'][:3]))
-
-    if len(G.nodes()) > 0:
-        # Layout
-        if layout_algo == 'spring':
-            pos = nx.spring_layout(G, k=2.5/np.sqrt(len(G.nodes())), iterations=80,
-                                   weight='weight', seed=42)
-        else:
-            pos = nx.kamada_kawai_layout(G, weight='weight')
-
-        # Separate node types
-        gestora_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'gestora']
-        dep_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'depositaria']
-
-        # Build edge traces
-        edge_x, edge_y = [], []
-        edge_weights = []
-        for u, v, d in G.edges(data=True):
-            x0, y0 = pos[u]
-            x1, y1 = pos[v]
-            edge_x += [x0, x1, None]
-            edge_y += [y0, y1, None]
-            edge_weights.append(d['weight'])
-
-        # Create multiple edge traces for varying width
-        fig_net = go.Figure()
-
-        # Draw edges with opacity based on weight
-        max_w = max(edge_weights) if edge_weights else 1
-        for u, v, d in G.edges(data=True):
-            x0, y0 = pos[u]
-            x1, y1 = pos[v]
-            w = d['weight']
-            norm_w = w / max_w
-            fig_net.add_trace(go.Scatter(
-                x=[x0, x1], y=[y0, y1],
-                mode='lines',
-                line=dict(
-                    width=max(0.5, norm_w * 8),
-                    color=f'rgba(226,164,78,{0.08 + norm_w * 0.35})'
-                ),
-                hoverinfo='text',
-                text=f"{u.split('|')[1]} ↔ {v.split('|')[1]}<br>{w} fondos",
-                showlegend=False
-            ))
-
-        # Gestora nodes
-        g_x = [pos[n][0] for n in gestora_nodes]
-        g_y = [pos[n][1] for n in gestora_nodes]
-        g_sizes = [max(8, min(50, G.nodes[n]['size'] * 0.5)) for n in gestora_nodes]
-        g_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos<br>Conexiones: {G.degree(n)}"
-                  for n in gestora_nodes]
-        g_labels = [n.split('|')[1] if G.nodes[n]['size'] > 20 else '' for n in gestora_nodes]
-
-        fig_net.add_trace(go.Scatter(
-            x=g_x, y=g_y,
-            mode='markers+text',
-            marker=dict(
-                size=g_sizes,
-                color=COLORS['accent'],
-                line=dict(width=1.5, color='rgba(226,164,78,0.4)'),
-                opacity=0.9,
-            ),
-            text=g_labels,
-            textposition='top center',
-            textfont=dict(size=8, color=COLORS['text_muted']),
-            hovertext=g_text,
-            hoverinfo='text',
-            name='Gestoras'
-        ))
-
-        # Depositaria nodes
-        d_x = [pos[n][0] for n in dep_nodes]
-        d_y = [pos[n][1] for n in dep_nodes]
-        d_sizes = [max(10, min(55, G.nodes[n]['size'] * 0.4)) for n in dep_nodes]
-        d_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos custodiados<br>Conexiones: {G.degree(n)}"
-                  for n in dep_nodes]
-        d_labels = [n.split('|')[1] if G.nodes[n]['size'] > 30 else '' for n in dep_nodes]
-
-        fig_net.add_trace(go.Scatter(
-            x=d_x, y=d_y,
-            mode='markers+text',
-            marker=dict(
-                size=d_sizes,
-                color=COLORS['accent3'],
-                symbol='diamond',
-                line=dict(width=1.5, color='rgba(124,152,133,0.4)'),
-                opacity=0.9,
-            ),
-            text=d_labels,
-            textposition='bottom center',
-            textfont=dict(size=8, color=COLORS['text_muted']),
-            hovertext=d_text,
-            hoverinfo='text',
-            name='Depositarias'
-        ))
-
-        fig_net.update_layout(
-            plot_bgcolor=COLORS['bg'],
-            paper_bgcolor=COLORS['bg'],
-            font=dict(family='DM Sans, sans-serif', color=COLORS['text'], size=12),
-            hoverlabel=dict(
-                bgcolor='rgba(20,20,20,0.95)', font_size=12,
-                font_family='DM Sans, sans-serif', bordercolor='rgba(255,255,255,0.1)'
-            ),
-            margin=dict(t=40, b=20, l=20, r=20),
-            height=700,
-            showlegend=True,
-            legend=dict(
-                orientation='h', yanchor='top', y=1.05, xanchor='center', x=0.5,
-                font=dict(size=12, color=COLORS['text']),
-                bgcolor='rgba(0,0,0,0)',
-            ),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
-            title=None,
-        )
-
-        st.plotly_chart(fig_net, use_container_width=True)
-
-        # Network stats
-        st.markdown("---")
-        st.markdown("### Métricas de Red")
-        nc1, nc2, nc3, nc4 = st.columns(4)
-
+    if view_mode == '3D Interactivo':
+        # ── THREE.JS 3D VIEW ──
         with nc1:
-            st.metric("Nodos", f"{len(G.nodes())}", f"{len(gestora_nodes)} gestoras · {len(dep_nodes)} depositarias")
-        with nc2:
-            st.metric("Vínculos", f"{len(G.edges())}", f"mín. {min_edge_weight} fondos")
-        with nc3:
-            if nx.is_connected(G):
-                st.metric("Componentes", "1", "grafo conexo")
-            else:
-                n_comp = nx.number_connected_components(G)
-                st.metric("Componentes", f"{n_comp}", "subgrafos aislados")
-        with nc4:
-            density = nx.density(G)
-            st.metric("Densidad", f"{density:.3f}", "ratio de conexiones")
+            min_w_3d = st.slider("Mín. fondos", 1, 30, 2, key='3d_min',
+                                  help="Filtra vínculos débiles")
 
-        # Top centrality
-        st.markdown("### Nodos sistémicos")
-        st.markdown(f"<p style='color:{COLORS['text_muted']}; margin-top:-0.7rem;'>Entidades con mayor centralidad de intermediación — potenciales puntos de fragilidad sistémica.</p>", unsafe_allow_html=True)
+        @st.cache_data
+        def build_3d_html(_edges_df, min_weight):
+            import json
+            filt = _edges_df[_edges_df['weight'] >= min_weight]
+            nodes_dict = {}
+            for _, r in filt.iterrows():
+                g = r['Gestora_short']
+                d = r['Depositaria_short']
+                if g not in nodes_dict:
+                    nodes_dict[g] = {'id': g, 'type': 'gestora', 'weight': 0}
+                if d not in nodes_dict:
+                    nodes_dict[d] = {'id': d, 'type': 'depositaria', 'weight': 0}
+                nodes_dict[g]['weight'] += r['weight']
+                nodes_dict[d]['weight'] += r['weight']
 
-        betw = nx.betweenness_centrality(G, weight='weight')
-        deg = nx.degree_centrality(G)
+            node_list = list(nodes_dict.values())
+            edge_list = [{'source': r['Gestora_short'], 'target': r['Depositaria_short'],
+                          'weight': int(r['weight'])} for _, r in filt.iterrows()]
 
-        top_betw = sorted(betw.items(), key=lambda x: -x[1])[:10]
-        centrality_df = pd.DataFrame([{
-            'Entidad': n.split('|')[1],
-            'Tipo': 'Gestora' if n.startswith('G|') else 'Depositaria',
-            'Betweenness': round(v, 4),
-            'Degree': round(deg[n], 4),
-            'Fondos': G.nodes[n]['size'],
-            'Conexiones': G.degree(n)
-        } for n, v in top_betw])
+            data_json = json.dumps({'nodes': node_list, 'edges': edge_list})
 
-        st.dataframe(centrality_df, use_container_width=True, hide_index=True,
-                     column_config={
-                         'Betweenness': st.column_config.NumberColumn(format='%.4f'),
-                         'Degree': st.column_config.NumberColumn(format='%.4f'),
-                     })
+            html = _THREE_JS_TEMPLATE.replace('__GRAPH_DATA_PLACEHOLDER__', data_json)
+            return html, len(node_list), len(edge_list)
+
+        html_3d, n_nodes, n_edges = build_3d_html(net_edges, min_w_3d)
+        components.html(html_3d, height=750, scrolling=False)
+
+        st.caption(f"{n_nodes} nodos · {n_edges} vínculos · Arrastra para rotar, scroll para zoom, click en nodo para enfocar")
 
     else:
-        st.info("No hay suficientes datos para el grafo con este filtro. Reduce el mínimo de fondos.")
+        # ── 2D PLOTLY VIEW ──
+        # Controls
+        with nc1:
+            min_edge_weight = st.slider("Mín. fondos por vínculo", 1, 30, 3,
+                                         help="Filtra relaciones con pocos fondos para simplificar el grafo")
+        with nc2:
+            layout_algo = st.selectbox("Layout", ['spring', 'kamada_kawai'], index=0)
+
+        # Build networkx graph
+        filtered_edges = net_edges[net_edges['weight'] >= min_edge_weight]
+
+        G = nx.Graph()
+        for _, row in filtered_edges.iterrows():
+            g_node = f"G|{row['Gestora_short']}"
+            d_node = f"D|{row['Depositaria_short']}"
+            G.add_node(g_node, node_type='gestora', full_name=row['Gestora'],
+                       size=gestora_sizes.get(row['Gestora_short'], 1))
+            G.add_node(d_node, node_type='depositaria', full_name=row['Depositaria'],
+                       size=depositaria_sizes.get(row['Depositaria_short'], 1))
+            G.add_edge(g_node, d_node, weight=row['weight'],
+                       funds=', '.join(row['funds'][:3]))
+
+        if len(G.nodes()) > 0:
+            # Layout
+            if layout_algo == 'spring':
+                pos = nx.spring_layout(G, k=2.5/np.sqrt(len(G.nodes())), iterations=80,
+                                       weight='weight', seed=42)
+            else:
+                pos = nx.kamada_kawai_layout(G, weight='weight')
+
+            # Separate node types
+            gestora_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'gestora']
+            dep_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'depositaria']
+
+            # Build edge traces
+            edge_x, edge_y = [], []
+            edge_weights = []
+            for u, v, d in G.edges(data=True):
+                x0, y0 = pos[u]
+                x1, y1 = pos[v]
+                edge_x += [x0, x1, None]
+                edge_y += [y0, y1, None]
+                edge_weights.append(d['weight'])
+
+            # Create multiple edge traces for varying width
+            fig_net = go.Figure()
+
+            # Draw edges with opacity based on weight
+            max_w = max(edge_weights) if edge_weights else 1
+            for u, v, d in G.edges(data=True):
+                x0, y0 = pos[u]
+                x1, y1 = pos[v]
+                w = d['weight']
+                norm_w = w / max_w
+                fig_net.add_trace(go.Scatter(
+                    x=[x0, x1], y=[y0, y1],
+                    mode='lines',
+                    line=dict(
+                        width=max(0.5, norm_w * 8),
+                        color=f'rgba(226,164,78,{0.08 + norm_w * 0.35})'
+                    ),
+                    hoverinfo='text',
+                    text=f"{u.split('|')[1]} ↔ {v.split('|')[1]}<br>{w} fondos",
+                    showlegend=False
+                ))
+
+            # Gestora nodes
+            g_x = [pos[n][0] for n in gestora_nodes]
+            g_y = [pos[n][1] for n in gestora_nodes]
+            g_sizes = [max(8, min(50, G.nodes[n]['size'] * 0.5)) for n in gestora_nodes]
+            g_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos<br>Conexiones: {G.degree(n)}"
+                      for n in gestora_nodes]
+            g_labels = [n.split('|')[1] if G.nodes[n]['size'] > 20 else '' for n in gestora_nodes]
+
+            fig_net.add_trace(go.Scatter(
+                x=g_x, y=g_y,
+                mode='markers+text',
+                marker=dict(
+                    size=g_sizes,
+                    color=COLORS['accent'],
+                    line=dict(width=1.5, color='rgba(226,164,78,0.4)'),
+                    opacity=0.9,
+                ),
+                text=g_labels,
+                textposition='top center',
+                textfont=dict(size=8, color=COLORS['text_muted']),
+                hovertext=g_text,
+                hoverinfo='text',
+                name='Gestoras'
+            ))
+
+            # Depositaria nodes
+            d_x = [pos[n][0] for n in dep_nodes]
+            d_y = [pos[n][1] for n in dep_nodes]
+            d_sizes = [max(10, min(55, G.nodes[n]['size'] * 0.4)) for n in dep_nodes]
+            d_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos custodiados<br>Conexiones: {G.degree(n)}"
+                      for n in dep_nodes]
+            d_labels = [n.split('|')[1] if G.nodes[n]['size'] > 30 else '' for n in dep_nodes]
+
+            fig_net.add_trace(go.Scatter(
+                x=d_x, y=d_y,
+                mode='markers+text',
+                marker=dict(
+                    size=d_sizes,
+                    color=COLORS['accent3'],
+                    symbol='diamond',
+                    line=dict(width=1.5, color='rgba(124,152,133,0.4)'),
+                    opacity=0.9,
+                ),
+                text=d_labels,
+                textposition='bottom center',
+                textfont=dict(size=8, color=COLORS['text_muted']),
+                hovertext=d_text,
+                hoverinfo='text',
+                name='Depositarias'
+            ))
+
+            fig_net.update_layout(
+                plot_bgcolor=COLORS['bg'],
+                paper_bgcolor=COLORS['bg'],
+                font=dict(family='DM Sans, sans-serif', color=COLORS['text'], size=12),
+                hoverlabel=dict(
+                    bgcolor='rgba(20,20,20,0.95)', font_size=12,
+                    font_family='DM Sans, sans-serif', bordercolor='rgba(255,255,255,0.1)'
+                ),
+                margin=dict(t=40, b=20, l=20, r=20),
+                height=700,
+                showlegend=True,
+                legend=dict(
+                    orientation='h', yanchor='top', y=1.05, xanchor='center', x=0.5,
+                    font=dict(size=12, color=COLORS['text']),
+                    bgcolor='rgba(0,0,0,0)',
+                ),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
+                title=None,
+            )
+
+            st.plotly_chart(fig_net, use_container_width=True)
+
+            # Network stats
+            st.markdown("---")
+            st.markdown("### Métricas de Red")
+            nc1, nc2, nc3, nc4 = st.columns(4)
+
+            with nc1:
+                st.metric("Nodos", f"{len(G.nodes())}", f"{len(gestora_nodes)} gestoras · {len(dep_nodes)} depositarias")
+            with nc2:
+                st.metric("Vínculos", f"{len(G.edges())}", f"mín. {min_edge_weight} fondos")
+            with nc3:
+                if nx.is_connected(G):
+                    st.metric("Componentes", "1", "grafo conexo")
+                else:
+                    n_comp = nx.number_connected_components(G)
+                    st.metric("Componentes", f"{n_comp}", "subgrafos aislados")
+            with nc4:
+                density = nx.density(G)
+                st.metric("Densidad", f"{density:.3f}", "ratio de conexiones")
+
+            # Top centrality
+            st.markdown("### Nodos sistémicos")
+            st.markdown(f"<p style='color:{COLORS['text_muted']}; margin-top:-0.7rem;'>Entidades con mayor centralidad de intermediación — potenciales puntos de fragilidad sistémica.</p>", unsafe_allow_html=True)
+
+            betw = nx.betweenness_centrality(G, weight='weight')
+            deg = nx.degree_centrality(G)
+
+            top_betw = sorted(betw.items(), key=lambda x: -x[1])[:10]
+            centrality_df = pd.DataFrame([{
+                'Entidad': n.split('|')[1],
+                'Tipo': 'Gestora' if n.startswith('G|') else 'Depositaria',
+                'Betweenness': round(v, 4),
+                'Degree': round(deg[n], 4),
+                'Fondos': G.nodes[n]['size'],
+                'Conexiones': G.degree(n)
+            } for n, v in top_betw])
+
+            st.dataframe(centrality_df, use_container_width=True, hide_index=True,
+                         column_config={
+                             'Betweenness': st.column_config.NumberColumn(format='%.4f'),
+                             'Degree': st.column_config.NumberColumn(format='%.4f'),
+                         })
+
+        else:
+            st.info("No hay suficientes datos para el grafo con este filtro. Reduce el mínimo de fondos.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
