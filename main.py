@@ -3,1342 +3,1097 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
+import networkx as nx
 import numpy as np
 import re
+from collections import Counter
+from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-# Page configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+
 st.set_page_config(
-    page_title="Análisis Fondos CNMV - Sesgo de Supervivencia",
-    page_icon="📊",
+    page_title="CNMV Fund Observatory · Sesgo de Supervivencia",
+    page_icon="◉",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Dark mode aesthetic CSS (keeping the same styles)
-st.markdown("""
+# ─────────────────────────────────────────────────────────────────────────────
+# THEME — Refined dark with amber/warm accent
+# ─────────────────────────────────────────────────────────────────────────────
+
+COLORS = {
+    'bg':          '#0a0a0a',
+    'surface':     '#141414',
+    'surface2':    '#1a1a1a',
+    'border':      'rgba(255,255,255,0.06)',
+    'text':        '#e8e4df',
+    'text_muted':  '#8a8580',
+    'accent':      '#e2a44e',      # warm amber
+    'accent2':     '#c2785c',      # terracotta
+    'accent3':     '#7c9885',      # muted sage
+    'green':       '#5fa87a',
+    'red':         '#c75d5d',
+    'purple':      '#9b8ec4',
+    'blue':        '#6b9bc3',
+}
+
+PLOTLY_LAYOUT = dict(
+    plot_bgcolor=COLORS['bg'],
+    paper_bgcolor=COLORS['bg'],
+    font=dict(family='DM Sans, sans-serif', color=COLORS['text'], size=12),
+    hoverlabel=dict(
+        bgcolor='rgba(20,20,20,0.95)',
+        font_size=12,
+        font_family='DM Sans, sans-serif',
+        bordercolor='rgba(255,255,255,0.1)'
+    ),
+    margin=dict(t=60, b=40, l=50, r=30),
+    xaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+    yaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+)
+
+st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    
-    .stApp {
-        background: #0f0f0f;
-    }
-    
-    .main {
-        background: #0f0f0f;
-        padding: 0;
-    }
-    
-    /* Metrics with dark glassmorphism */
-    [data-testid="metric-container"] {
-        background: linear-gradient(135deg, rgba(30, 30, 30, 0.9) 0%, rgba(20, 20, 20, 0.9) 100%);
-        padding: 1.5rem;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
-    }
-    
-    [data-testid="metric-container"]:hover {
-        transform: translateY(-2px);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        box-shadow: 0 12px 40px rgba(99, 102, 241, 0.1);
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-label"] {
-        color: #94a3b8;
-        font-size: 0.75rem;
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap');
+
+    :root {{
+        --bg: {COLORS['bg']};
+        --surface: {COLORS['surface']};
+        --accent: {COLORS['accent']};
+        --accent2: {COLORS['accent2']};
+        --text: {COLORS['text']};
+        --muted: {COLORS['text_muted']};
+    }}
+
+    .stApp {{ background: var(--bg); }}
+    .main {{ background: var(--bg); }}
+
+    * {{ font-family: 'DM Sans', sans-serif; }}
+
+    /* ── Metrics ── */
+    [data-testid="metric-container"] {{
+        background: var(--surface);
+        padding: 1.4rem 1.6rem;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.04);
+        transition: border-color 0.3s ease;
+    }}
+    [data-testid="metric-container"]:hover {{
+        border-color: rgba(226,164,78,0.25);
+    }}
+    [data-testid="metric-container"] [data-testid="metric-label"] {{
+        color: var(--muted);
+        font-size: 0.7rem;
         font-weight: 500;
-        letter-spacing: 1px;
+        letter-spacing: 1.5px;
         text-transform: uppercase;
-        opacity: 0.8;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-value"] {
-        color: #f1f5f9;
-        font-size: 2rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-delta"] {
-        color: #64748b;
-        font-size: 0.875rem;
-        opacity: 0.7;
-    }
-    
-    /* Headers */
-    h1 {
-        color: #f1f5f9;
-        font-weight: 700;
-        font-size: 2.5rem;
-        letter-spacing: -1px;
-        margin-bottom: 0.5rem;
-    }
-    
-    h2 {
-        color: #e2e8f0;
-        font-weight: 600;
-        font-size: 1.75rem;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-    }
-    
-    h3 {
-        color: #cbd5e1;
+    }}
+    [data-testid="metric-container"] [data-testid="metric-value"] {{
+        color: var(--text);
+        font-family: 'DM Mono', monospace;
+        font-size: 1.8rem;
         font-weight: 500;
-        font-size: 1.25rem;
-    }
-    
-    /* Search input styling */
-    .stTextInput > div > div > input {
-        background: rgba(30, 30, 30, 0.9);
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        border-radius: 12px;
-        padding: 0.75rem 1rem;
-        font-size: 1rem;
-        color: #f1f5f9;
-        transition: all 0.3s ease;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-        background: rgba(30, 30, 30, 1);
-    }
-    
-    .stTextInput > div > div > input::placeholder {
-        color: #64748b;
-    }
-    
-    /* Select box styling */
-    .stSelectbox > div > div {
-        background: rgba(30, 30, 30, 0.9);
-        border-radius: 12px;
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        color: #f1f5f9;
-    }
-    
-    /* Dataframe styling */
-    [data-testid="stDataFrame"] {
-        background: rgba(30, 30, 30, 0.9);
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid rgba(99, 102, 241, 0.1);
-    }
-    
-    .dataframe {
-        font-size: 14px;
-        border: none !important;
-    }
-    
-    .dataframe thead tr th {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-        color: white !important;
+    }}
+    [data-testid="metric-container"] [data-testid="metric-delta"] {{
+        color: var(--muted);
+        font-size: 0.8rem;
+    }}
+
+    /* ── Headers ── */
+    h1 {{
+        font-family: 'Playfair Display', serif !important;
+        color: var(--text) !important;
+        font-weight: 700 !important;
+        font-size: 2.4rem !important;
+        letter-spacing: -0.5px !important;
+    }}
+    h2 {{
+        font-family: 'Playfair Display', serif !important;
+        color: var(--text) !important;
         font-weight: 600 !important;
-        text-transform: uppercase !important;
-        font-size: 0.75rem !important;
-        letter-spacing: 1px !important;
-        padding: 1rem !important;
-        border: none !important;
-    }
-    
-    .dataframe tbody tr {
-        background: rgba(30, 30, 30, 0.9) !important;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-    }
-    
-    .dataframe tbody tr:hover {
-        background: rgba(99, 102, 241, 0.1) !important;
-    }
-    
-    .dataframe tbody tr td {
-        color: #e2e8f0 !important;
-        border: none !important;
-        padding: 0.75rem !important;
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        background: rgba(30, 30, 30, 0.5);
-        border-radius: 16px;
-        padding: 0.5rem;
-        gap: 0.5rem;
-        border: 1px solid rgba(99, 102, 241, 0.1);
-    }
-    
-    .stTabs [data-baseweb="tab"] {
+        font-size: 1.6rem !important;
+    }}
+    h3 {{
+        color: {COLORS['text_muted']} !important;
+        font-weight: 500 !important;
+        font-size: 1rem !important;
+        letter-spacing: 0.5px !important;
+    }}
+
+    /* ── Tabs ── */
+    .stTabs [data-baseweb="tab-list"] {{
         background: transparent;
-        border-radius: 12px;
-        color: #94a3b8;
+        gap: 0;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        padding: 0;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        background: transparent;
+        border-radius: 0;
+        color: var(--muted);
         font-weight: 500;
-        padding: 0.75rem 1.5rem;
+        font-size: 0.85rem;
+        letter-spacing: 0.5px;
+        padding: 0.8rem 1.6rem;
+        border-bottom: 2px solid transparent;
         transition: all 0.3s ease;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background: rgba(99, 102, 241, 0.1);
-        color: #e2e8f0;
-    }
-    
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
-    }
-    
-    /* Author box */
-    .author-box {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
-        padding: 1rem 2rem;
-        border-radius: 16px;
-        margin: 1.5rem 0;
-        text-align: center;
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        font-size: 0.9rem;
-        color: #94a3b8;
-    }
-    
-    .author-box a {
-        color: #a5b4fc;
-        text-decoration: none;
-        font-weight: 600;
-        transition: color 0.3s ease;
-    }
-    
-    .author-box a:hover {
-        color: #c7d2fe;
-    }
-    
-    /* Info boxes */
-    .info-box {
-        background: rgba(99, 102, 241, 0.1);
-        border-left: 4px solid #6366f1;
-        padding: 1rem 1.5rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-        color: #e2e8f0;
-    }
-    
-    .warning-box {
-        background: rgba(239, 68, 68, 0.1);
-        border-left: 4px solid #ef4444;
-        padding: 1rem 1.5rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-        color: #fca5a5;
-    }
-    
-    .data-quality-box {
-        background: rgba(251, 191, 36, 0.1);
-        border-left: 4px solid #fbbf24;
-        padding: 1rem 1.5rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-        color: #fde047;
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background: #1a1a1a;
-        padding-top: 2rem;
-    }
-    
-    /* Radio buttons */
-    .stRadio > label {
-        color: #e2e8f0;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-    }
-    
-    /* Plotly charts background */
-    .js-plotly-plot {
+    }}
+    .stTabs [data-baseweb="tab"]:hover {{
+        color: var(--text);
+    }}
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+        background: transparent;
+        color: var(--accent);
+        border-bottom: 2px solid var(--accent);
+    }}
+    .stTabs [data-baseweb="tab-highlight"] {{
+        display: none;
+    }}
+
+    /* ── Inputs ── */
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div {{
+        background: var(--surface) !important;
+        border: 1px solid rgba(255,255,255,0.06) !important;
+        border-radius: 10px !important;
+        color: var(--text) !important;
+    }}
+    .stTextInput > div > div > input:focus {{
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 2px rgba(226,164,78,0.15) !important;
+    }}
+    .stTextInput > div > div > input::placeholder {{ color: var(--muted) !important; }}
+    label {{ color: var(--muted) !important; font-size: 0.75rem !important; letter-spacing: 0.5px; text-transform: uppercase; }}
+
+    /* ── DataFrames ── */
+    [data-testid="stDataFrame"] {{
         border-radius: 12px;
         overflow: hidden;
-        border: 1px solid rgba(99, 102, 241, 0.1);
-    }
+        border: 1px solid rgba(255,255,255,0.04);
+    }}
+
+    /* ── Misc ── */
+    .stMarkdown hr {{ border-color: rgba(255,255,255,0.06); margin: 2rem 0; }}
+    #MainMenu {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
+    .block-container {{ padding-top: 2rem; max-width: 1300px; }}
     
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Smooth scrolling */
-    html {
-        scroll-behavior: smooth;
-    }
-    
-    /* Loading animation */
-    .stSpinner > div {
-        border-color: #6366f1;
-    }
+    /* ── Custom components ── */
+    .hero-stat {{
+        font-family: 'DM Mono', monospace;
+        font-size: 3.2rem;
+        font-weight: 500;
+        line-height: 1;
+    }}
+    .hero-label {{
+        font-size: 0.7rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-top: 0.4rem;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-# Load and process data with data quality checks
-@st.cache_data
-def load_and_process_data():
-    df = pd.read_csv('cnmv_funds_data_FINAL.csv')
-    
-    def extract_date_from_filename(filename):
-        match = re.search(r'(\d{2})-(\d{2})-(\d{4})_al_(\d{2})-(\d{2})-(\d{4})', filename)
-        if match:
-            end_date = pd.to_datetime(f"{match.group(6)}-{match.group(5)}-{match.group(4)}", format='%Y-%m-%d')
-            return end_date
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA LOADING — Fixed CSV parsing
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(show_spinner=False)
+def load_data():
+    """Parse the CNMV CSV with its tricky quoting format."""
+    with open('cnmv_funds_data_FINAL.csv', 'r', encoding='utf-8-sig') as f:
+        lines = f.readlines()
+
+    header = lines[0].strip()
+    cleaned = [header]
+    for line in lines[1:]:
+        line = line.strip()
+        if line.startswith('"') and line.endswith('"'):
+            line = line[1:-1]
+            line = line.replace('""', '"')
+        cleaned.append(line)
+
+    import io
+    df = pd.read_csv(io.StringIO('\n'.join(cleaned)))
+
+    # Extract end date from bulletin filename
+    def _extract_date(filename):
+        m = re.search(r'(\d{2})-(\d{2})-(\d{4})_al_(\d{2})-(\d{2})-(\d{4})', str(filename))
+        if m:
+            return pd.to_datetime(f"{m.group(6)}-{m.group(5)}-{m.group(4)}")
+        m = re.search(r'(\d{2})-(\d{2})-(\d{4})', str(filename))
+        if m:
+            return pd.to_datetime(f"{m.group(3)}-{m.group(2)}-{m.group(1)}")
         return None
-    
-    df['date'] = df['file'].apply(extract_date_from_filename)
+
+    df['date'] = df['file'].apply(_extract_date)
     df = df.dropna(subset=['date'])
     df['year'] = df['date'].dt.year
-    df['month'] = df['date'].dt.month
-    df['year_month'] = df['date'].dt.to_period('M')
-    
-    # Data quality: remove duplicates if any
     df = df.drop_duplicates(subset=['N_Registro', 'status', 'date'])
-    
+
     return df
 
-# Load main data
-df = load_and_process_data()
 
-# Process lifecycle data with enhanced data quality checks
-@st.cache_data
-def process_lifecycle_data(df):
-    births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
-    deaths = df[df['status'] == 'BAJAS']
-    
-    births_lifecycle = births[births['N_Registro'].notna()].copy()
-    deaths_lifecycle = deaths[deaths['N_Registro'].notna()].copy()
-    
-    # Get unique funds with their first registration
-    unique_funds = births_lifecycle.groupby('N_Registro').agg({
-        'Nombre': 'first',
-        'date': 'min',  # First registration date
-        'Gestora': 'first',
-        'Depositaria': 'first'
-    }).reset_index()
-    unique_funds.columns = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Gestora', 'Depositaria']
-    
-    # Get death dates (first death date if multiple)
-    death_dates = deaths_lifecycle.groupby('N_Registro')['date'].min().reset_index()
+@st.cache_data(show_spinner=False)
+def build_lifecycle(_df):
+    """Build fund lifecycle table from raw events."""
+    births = _df[_df['status'] == 'NUEVAS_INSCRIPCIONES']
+    deaths = _df[_df['status'] == 'BAJAS']
+
+    unique = births[births['N_Registro'].notna()].groupby('N_Registro').agg(
+        Nombre=('Nombre', 'first'),
+        Fecha_Alta=('date', 'min'),
+        Gestora=('Gestora', 'first'),
+        Depositaria=('Depositaria', 'first'),
+    ).reset_index()
+
+    death_dates = deaths[deaths['N_Registro'].notna()].groupby('N_Registro')['date'].min().reset_index()
     death_dates.columns = ['N_Registro', 'Fecha_Baja']
-    
-    # Merge to create lifecycle
-    fund_lifecycle = unique_funds.merge(death_dates, on='N_Registro', how='left')
-    
-    # Calculate life in years
-    fund_lifecycle['Vida_Anos'] = ((fund_lifecycle['Fecha_Baja'] - fund_lifecycle['Fecha_Alta']).dt.days / 365.25).round(1)
-    
-    # DATA QUALITY CHECKS AND CLEANING
-    initial_count = len(fund_lifecycle)
-    
-    # 1. Remove records where death date is before birth date (negative life)
-    invalid_dates = fund_lifecycle['Vida_Anos'] < 0
-    num_invalid_dates = invalid_dates.sum()
-    
-    # 2. Remove records with unreasonably long life (e.g., > 50 years)
-    too_long_life = fund_lifecycle['Vida_Anos'] > 50
-    num_too_long = too_long_life.sum()
-    
-    # 3. Keep track of removed records for reporting
-    removed_records = fund_lifecycle[invalid_dates | too_long_life].copy()
-    
-    # 4. Clean the data
-    fund_lifecycle = fund_lifecycle[~invalid_dates & ~too_long_life]
-    
-    # 5. Also remove funds with same birth and death date (0 days life) if suspicious
-    zero_life = (fund_lifecycle['Vida_Anos'] == 0) & fund_lifecycle['Fecha_Baja'].notna()
-    num_zero_life = zero_life.sum()
-    
-    # Optional: remove zero-life funds if they seem erroneous
-    # fund_lifecycle = fund_lifecycle[~zero_life]
-    
-    # Add status column
-    fund_lifecycle['Estado_Actual'] = fund_lifecycle['Fecha_Baja'].apply(lambda x: '✅ Activo' if pd.isna(x) else '💀 Liquidado')
-    fund_lifecycle['Año_Alta'] = fund_lifecycle['Fecha_Alta'].dt.year
-    fund_lifecycle['Año_Baja'] = fund_lifecycle['Fecha_Baja'].dt.year
-    
-    # Create data quality report
-    quality_report = {
-        'initial_count': initial_count,
-        'invalid_dates': num_invalid_dates,
-        'too_long_life': num_too_long,
-        'zero_life': num_zero_life,
-        'final_count': len(fund_lifecycle),
-        'removed_records': removed_records
-    }
-    
-    return fund_lifecycle, quality_report
 
-# Process lifecycle data with quality checks
-fund_lifecycle, quality_report = process_lifecycle_data(df)
+    lc = unique.merge(death_dates, on='N_Registro', how='left')
+    lc['Vida_Anos'] = ((lc['Fecha_Baja'] - lc['Fecha_Alta']).dt.days / 365.25).round(1)
 
-# Calculate key metrics using cleaned data
-births = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
-deaths = df[df['status'] == 'BAJAS']
+    # Clean: remove negative lives and >50yr outliers
+    lc = lc[(lc['Vida_Anos'].isna()) | ((lc['Vida_Anos'] >= 0) & (lc['Vida_Anos'] <= 50))]
 
-total_births = len(births)
-total_deaths = len(deaths)
-mortality_rate = (total_deaths / total_births * 100) if total_births > 0 else 0
-net_change = total_births - total_deaths
+    lc['Activo'] = lc['Fecha_Baja'].isna()
+    lc['Año_Alta'] = lc['Fecha_Alta'].dt.year
+    lc['Año_Baja'] = lc['Fecha_Baja'].dt.year
 
-# Title
-st.markdown("# 📊 Análisis de Fondos Españoles - Sesgo de Supervivencia")
-st.markdown("""
-<div class="author-box">
-    <strong>Análisis del Sesgo de Supervivencia en Fondos de Inversión 11/2004 - 09/2025</strong><br>
-    Por <a href="https://twitter.com/Gsnchez" target="_blank">@Gsnchez</a> • 
-    <a href="https://bquantfinance.com" target="_blank">bquantfinance.com</a> • 
-    Datos CNMV 2004-2025
+    return lc
+
+
+@st.cache_data(show_spinner=False)
+def build_network_data(_df):
+    """Build Gestora–Depositaria network from fund relationships."""
+    valid = _df[_df['Gestora'].notna() & _df['Depositaria'].notna()].copy()
+
+    # Shorten names for display
+    def _short(name, max_len=35):
+        name = str(name)
+        # Remove common suffixes
+        for suffix in [', S.G.I.I.C., S.A.', ', S.A., SGIIC', ', S.A., S.G.I.I.C.', 
+                       ', SGIIC, S.A.', ', SGIIC', ', S.A.', ', S.A']:
+            name = name.replace(suffix, '')
+        return name[:max_len] + '…' if len(name) > max_len else name
+
+    # Edge data: each unique fund is one edge
+    edges = valid.drop_duplicates(subset=['N_Registro']).groupby(
+        ['Gestora', 'Depositaria']
+    ).agg(
+        weight=('N_Registro', 'count'),
+        funds=('Nombre', lambda x: list(x)[:5])
+    ).reset_index()
+
+    edges['Gestora_short'] = edges['Gestora'].apply(_short)
+    edges['Depositaria_short'] = edges['Depositaria'].apply(_short)
+
+    # Node sizes
+    gestora_sizes = edges.groupby('Gestora_short')['weight'].sum().to_dict()
+    depositaria_sizes = edges.groupby('Depositaria_short')['weight'].sum().to_dict()
+
+    return edges, gestora_sizes, depositaria_sizes
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOAD
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.spinner('Cargando datos CNMV…'):
+    df = load_data()
+    lifecycle = build_lifecycle(df)
+    net_edges, gestora_sizes, depositaria_sizes = build_network_data(df)
+
+births_df = df[df['status'] == 'NUEVAS_INSCRIPCIONES']
+deaths_df = df[df['status'] == 'BAJAS']
+total_births = len(births_df)
+total_deaths = len(deaths_df)
+active_count = lifecycle['Activo'].sum()
+mortality_pct = total_deaths / total_births * 100 if total_births > 0 else 0
+date_range_str = f"{df['date'].min().strftime('%b %Y')} — {df['date'].max().strftime('%b %Y')}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HEADER
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.markdown(f"""
+<div style="margin-bottom: 0.5rem;">
+    <h1 style="margin-bottom: 0.2rem;">Observatorio de Fondos CNMV</h1>
+    <p style="color: {COLORS['text_muted']}; font-size: 0.95rem; margin: 0;">
+        Sesgo de supervivencia en la industria española de fondos de inversión · {date_range_str}
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
-# Newsletter banner
-st.markdown("""
-<div style='background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;'>
-    <h3 style='color: #a5b4fc; margin: 0 0 10px 0;'>📬 BQuant Fund Lab Newsletter</h3>
-    <p style='color: #94a3b8; margin: 0 0 15px 0;'>Análisis cuantitativo de fondos</p>
-    <a href='https://bquantfundlab.substack.com/' target='_blank' style='background: #6366f1; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; display: inline-block;'>Suscribirse →</a>
-</div>
-""", unsafe_allow_html=True)
+# Hero metrics row
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1:
+    st.metric("Registrados", f"{total_births:,}", f"{df['Gestora'].nunique()} gestoras")
+with c2:
+    st.metric("Liquidados", f"{total_deaths:,}", f"{mortality_pct:.0f}% mortalidad")
+with c3:
+    st.metric("Activos hoy", f"{active_count:,}", f"{active_count/total_births*100:.0f}% supervivencia")
+with c4:
+    med_life = lifecycle[lifecycle['Vida_Anos'].notna()]['Vida_Anos'].median()
+    st.metric("Vida mediana", f"{med_life:.1f} años", "fondos liquidados")
+with c5:
+    st.metric("Depositarias", f"{df['Depositaria'].nunique()}", f"{len(net_edges)} vínculos")
 
-# Key metrics at top
-col1, col2, col3, col4 = st.columns(4)
 
-with col1:
-    st.metric(
-        label="Total Fondos",
-        value=f"{total_births:,}",
-        delta="registrados"
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# TABS
+# ─────────────────────────────────────────────────────────────────────────────
 
-with col2:
-    st.metric(
-        label="Liquidados",
-        value=f"{total_deaths:,}",
-        delta=f"{mortality_rate:.0f}% mortalidad"
-    )
+tab_network, tab_survival, tab_temporal, tab_explorer = st.tabs([
+    "RED FINANCIERA", "SUPERVIVENCIA", "EVOLUCIÓN", "EXPLORADOR"
+])
 
-with col3:
-    # Use cleaned data for active count
-    active_funds = len(fund_lifecycle[fund_lifecycle['Fecha_Baja'].isna()])
-    st.metric(
-        label="Activos",
-        value=f"{active_funds:,}",
-        delta="validados"
-    )
 
-with col4:
-    st.metric(
-        label="Sesgo",
-        value=f"{abs(net_change):,}",
-        delta="fondos ocultos",
-        delta_color="inverse"
-    )
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 1 — NETWORK
+# ═════════════════════════════════════════════════════════════════════════════
 
-# Main tabs
-tabs = ["🔍 **Búsqueda de Fondos**", "📊 **Análisis Temporal**", "🔬 **Calidad de Datos**"]
-tab_list = st.tabs(tabs)
-
-# Tab 1: Fund Search (Enhanced)
-with tab_list[0]:
-    st.markdown("### Búsqueda y Ciclo de Vida de Fondos")
-    
-    # Enhanced search interface with multiple filters
-    st.markdown("#### 🔍 Filtros de Búsqueda")
-    
-    # First row of filters
-    col1, col2, col3 = st.columns([2, 1, 1])
-    
-    with col1:
-        search_term = st.text_input(
-            "Buscar por Nombre o Nº Registro",
-            placeholder="Ej: CAIXASABADELL o 3043...",
-            help="Búsqueda por nombre del fondo o número de registro"
-        )
-    
-    with col2:
-        status_search = st.selectbox(
-            "Estado",
-            options=['Todos', 'Activos', 'Liquidados'],
-            index=0
-        )
-    
-    with col3:
-        # Get unique years for filter
-        all_years = sorted(list(set(fund_lifecycle['Año_Alta'].dropna().astype(int).tolist() + 
-                                  fund_lifecycle['Año_Baja'].dropna().astype(int).tolist())))
-        
-        year_range = st.select_slider(
-            "Rango de Años",
-            options=all_years,
-            value=(min(all_years), max(all_years)),
-            help="Filtra fondos activos en este período"
-        )
-    
-    # Second row of filters
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        # Get unique Gestoras
-        gestoras = ['Todas'] + sorted(fund_lifecycle['Gestora'].dropna().unique().tolist())
-        selected_gestora = st.selectbox(
-            "Gestora",
-            options=gestoras,
-            index=0
-        )
-    
-    with col2:
-        # Get unique Depositarias
-        depositarias = ['Todas'] + sorted(fund_lifecycle['Depositaria'].dropna().unique().tolist())
-        selected_depositaria = st.selectbox(
-            "Depositaria",
-            options=depositarias,
-            index=0
-        )
-    
-    with col3:
-        vida_filter = st.select_slider(
-            "Vida del Fondo (años)",
-            options=['Todos', '< 1', '1-3', '3-5', '5-10', '> 10'],
-            value='Todos',
-            help="Filtra por duración de vida (solo liquidados)"
-        )
-    
-    # Apply all filters
-    filtered_lifecycle = fund_lifecycle.copy()
-    
-    # Text search filter
-    if search_term:
-        mask = (
-            filtered_lifecycle['Nombre'].str.contains(search_term.upper(), case=False, na=False) |
-            filtered_lifecycle['N_Registro'].astype(str).str.contains(search_term, na=False)
-        )
-        filtered_lifecycle = filtered_lifecycle[mask]
-    
-    # Status filter
-    if status_search == 'Activos':
-        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].isna()]
-    elif status_search == 'Liquidados':
-        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()]
-    
-    # Year range filter
-    mask = (
-        (filtered_lifecycle['Año_Alta'] >= year_range[0]) & 
-        (filtered_lifecycle['Año_Alta'] <= year_range[1])
-    ) | (
-        (filtered_lifecycle['Año_Baja'] >= year_range[0]) & 
-        (filtered_lifecycle['Año_Baja'] <= year_range[1])
-    )
-    filtered_lifecycle = filtered_lifecycle[mask]
-    
-    # Gestora filter
-    if selected_gestora != 'Todas':
-        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Gestora'] == selected_gestora]
-    
-    # Depositaria filter
-    if selected_depositaria != 'Todas':
-        filtered_lifecycle = filtered_lifecycle[filtered_lifecycle['Depositaria'] == selected_depositaria]
-    
-    # Life duration filter
-    if vida_filter != 'Todos' and 'Vida_Anos' in filtered_lifecycle.columns:
-        if vida_filter == '< 1':
-            filtered_lifecycle = filtered_lifecycle[
-                (filtered_lifecycle['Vida_Anos'] < 1) & filtered_lifecycle['Vida_Anos'].notna()
-            ]
-        elif vida_filter == '1-3':
-            filtered_lifecycle = filtered_lifecycle[
-                (filtered_lifecycle['Vida_Anos'] >= 1) & (filtered_lifecycle['Vida_Anos'] < 3)
-            ]
-        elif vida_filter == '3-5':
-            filtered_lifecycle = filtered_lifecycle[
-                (filtered_lifecycle['Vida_Anos'] >= 3) & (filtered_lifecycle['Vida_Anos'] < 5)
-            ]
-        elif vida_filter == '5-10':
-            filtered_lifecycle = filtered_lifecycle[
-                (filtered_lifecycle['Vida_Anos'] >= 5) & (filtered_lifecycle['Vida_Anos'] < 10)
-            ]
-        elif vida_filter == '> 10':
-            filtered_lifecycle = filtered_lifecycle[
-                filtered_lifecycle['Vida_Anos'] >= 10
-            ]
-    
-    # Statistics summary
-    total_in_search = len(filtered_lifecycle)
-    active_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].isna()])
-    liquidated_in_search = len(filtered_lifecycle[filtered_lifecycle['Fecha_Baja'].notna()])
-    
-    # Display metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Fondos", f"{total_in_search:,}")
-    
-    with col2:
-        st.metric("Activos", f"{active_in_search:,}", 
-                  delta=f"{(active_in_search/total_in_search*100):.1f}%" if total_in_search > 0 else "0%")
-    
-    with col3:
-        st.metric("Liquidados", f"{liquidated_in_search:,}",
-                  delta=f"{(liquidated_in_search/total_in_search*100):.1f}%" if total_in_search > 0 else "0%")
-    
-    with col4:
-        avg_vida = filtered_lifecycle[filtered_lifecycle['Vida_Anos'].notna()]['Vida_Anos'].mean()
-        st.metric("Vida Media", f"{avg_vida:.1f} años" if not pd.isna(avg_vida) else "N/A")
-    
-    # Display results in table
-    if total_in_search > 0:
-        st.markdown(f"#### 📋 Resultados ({total_in_search:,} fondos encontrados)")
-        
-        display_lifecycle = filtered_lifecycle.copy()
-        display_lifecycle['N_Registro'] = display_lifecycle['N_Registro'].astype(int)
-        display_lifecycle = display_lifecycle.sort_values('Fecha_Alta', ascending=False)
-        
-        display_lifecycle['Fecha_Alta'] = display_lifecycle['Fecha_Alta'].dt.strftime('%Y-%m-%d')
-        display_lifecycle['Fecha_Baja'] = display_lifecycle['Fecha_Baja'].dt.strftime('%Y-%m-%d')
-        
-        # Ensure no negative values are displayed
-        display_lifecycle['Vida_Anos'] = display_lifecycle['Vida_Anos'].apply(
-            lambda x: x if pd.isna(x) or x >= 0 else None
-        )
-        
-        display_cols = ['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos', 'Estado_Actual', 'Gestora', 'Depositaria']
-        
-        st.dataframe(
-            display_lifecycle[display_cols],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "N_Registro": st.column_config.NumberColumn("Nº Registro", width="small"),
-                "Nombre": st.column_config.TextColumn("Nombre del Fondo", width="large"),
-                "Fecha_Alta": st.column_config.TextColumn("Fecha Alta", width="small"),
-                "Fecha_Baja": st.column_config.TextColumn("Fecha Baja", width="small"),
-                "Vida_Anos": st.column_config.NumberColumn("Vida (años)", format="%.1f", width="small"),
-                "Estado_Actual": st.column_config.TextColumn("Estado", width="small"),
-                "Gestora": st.column_config.TextColumn("Gestora", width="medium"),
-                "Depositaria": st.column_config.TextColumn("Depositaria", width="medium")
-            }
-        )
-        
-        # STATISTICS SECTION
-        st.markdown("---")
-        st.markdown("### 📊 Estadísticas Detalladas")
-        
-        # Create tabs for different statistics
-        stat_tabs = st.tabs(["🏢 Por Gestora", "🏦 Por Depositaria", "📅 Por Años", "⚰️ Análisis de Mortalidad"])
-        
-        # Tab 1: Statistics by Gestora
-        with stat_tabs[0]:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Top Gestoras by number of funds
-                top_gestoras = filtered_lifecycle.groupby('Gestora').agg({
-                    'N_Registro': 'count',
-                    'Estado_Actual': lambda x: (x == '✅ Activo').sum(),
-                    'Vida_Anos': 'mean'
-                }).round(1)
-                top_gestoras.columns = ['Total_Fondos', 'Activos', 'Vida_Media']
-                top_gestoras['Liquidados'] = top_gestoras['Total_Fondos'] - top_gestoras['Activos']
-                top_gestoras['Tasa_Mortalidad'] = (top_gestoras['Liquidados'] / top_gestoras['Total_Fondos'] * 100).round(1)
-                top_gestoras = top_gestoras.sort_values('Total_Fondos', ascending=False).head(10)
-                
-                st.markdown("**🏆 Top 10 Gestoras por Número de Fondos**")
-                st.dataframe(
-                    top_gestoras,
-                    use_container_width=True,
-                    column_config={
-                        "Total_Fondos": st.column_config.NumberColumn("Total", format="%d"),
-                        "Activos": st.column_config.NumberColumn("Activos", format="%d"),
-                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
-                        "Vida_Media": st.column_config.NumberColumn("Vida Media (años)", format="%.1f"),
-                        "Tasa_Mortalidad": st.column_config.NumberColumn("Mortalidad %", format="%.1f%%")
-                    }
-                )
-            
-            with col2:
-                # Gestoras with highest mortality
-                mortality_gestoras = filtered_lifecycle[filtered_lifecycle['Gestora'].notna()].groupby('Gestora').agg({
-                    'N_Registro': 'count',
-                    'Estado_Actual': lambda x: (x == '💀 Liquidado').sum()
-                })
-                mortality_gestoras.columns = ['Total', 'Liquidados']
-                mortality_gestoras = mortality_gestoras[mortality_gestoras['Total'] >= 5]
-                mortality_gestoras['Tasa_Mortalidad'] = (mortality_gestoras['Liquidados'] / mortality_gestoras['Total'] * 100).round(1)
-                mortality_gestoras = mortality_gestoras.sort_values('Tasa_Mortalidad', ascending=False).head(10)
-                
-                st.markdown("**💀 Gestoras con Mayor Tasa de Mortalidad** *(mín. 5 fondos)*")
-                st.dataframe(
-                    mortality_gestoras,
-                    use_container_width=True,
-                    column_config={
-                        "Total": st.column_config.NumberColumn("Total Fondos", format="%d"),
-                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
-                        "Tasa_Mortalidad": st.column_config.ProgressColumn(
-                            "Mortalidad %",
-                            format="%.1f%%",
-                            min_value=0,
-                            max_value=100
-                        )
-                    }
-                )
-        
-        # Tab 2: Statistics by Depositaria
-        with stat_tabs[1]:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Top Depositarias
-                top_depositarias = filtered_lifecycle.groupby('Depositaria').agg({
-                    'N_Registro': 'count',
-                    'Estado_Actual': lambda x: (x == '✅ Activo').sum(),
-                    'Vida_Anos': 'mean'
-                }).round(1)
-                top_depositarias.columns = ['Total_Fondos', 'Activos', 'Vida_Media']
-                top_depositarias['Liquidados'] = top_depositarias['Total_Fondos'] - top_depositarias['Activos']
-                top_depositarias = top_depositarias.sort_values('Total_Fondos', ascending=False).head(10)
-                
-                st.markdown("**🏆 Top 10 Depositarias por Número de Fondos**")
-                st.dataframe(
-                    top_depositarias,
-                    use_container_width=True,
-                    column_config={
-                        "Total_Fondos": st.column_config.NumberColumn("Total", format="%d"),
-                        "Activos": st.column_config.NumberColumn("Activos", format="%d"),
-                        "Liquidados": st.column_config.NumberColumn("Liquidados", format="%d"),
-                        "Vida_Media": st.column_config.NumberColumn("Vida Media (años)", format="%.1f")
-                    }
-                )
-            
-            with col2:
-                # Market concentration
-                total_funds = len(filtered_lifecycle)
-                top5_depositarias = filtered_lifecycle.groupby('Depositaria')['N_Registro'].count().nlargest(5)
-                concentration = (top5_depositarias.sum() / total_funds * 100)
-                
-                st.markdown("**📊 Concentración del Mercado**")
-                st.metric("Top 5 Depositarias", f"{concentration:.1f}%", "del total de fondos")
-                
-                # Show concentration breakdown
-                concentration_data = pd.DataFrame({
-                    'Depositaria': top5_depositarias.index,
-                    'Fondos': top5_depositarias.values,
-                    'Porcentaje': (top5_depositarias.values / total_funds * 100).round(1)
-                })
-                st.dataframe(concentration_data, use_container_width=True, hide_index=True)
-        
-        # Tab 3: Statistics by Years
-        with stat_tabs[2]:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Funds by year of creation
-                yearly_creation = filtered_lifecycle.groupby('Año_Alta').agg({
-                    'N_Registro': 'count',
-                    'Estado_Actual': lambda x: (x == '✅ Activo').sum()
-                })
-                yearly_creation.columns = ['Creados', 'Aún_Activos']
-                yearly_creation['Supervivencia_%'] = (yearly_creation['Aún_Activos'] / yearly_creation['Creados'] * 100).round(1)
-                yearly_creation = yearly_creation.sort_index(ascending=False).head(10)
-                
-                st.markdown("**📅 Fondos por Año de Creación** *(últimos 10 años)*")
-                st.dataframe(
-                    yearly_creation,
-                    use_container_width=True,
-                    column_config={
-                        "Creados": st.column_config.NumberColumn("Creados", format="%d"),
-                        "Aún_Activos": st.column_config.NumberColumn("Aún Activos", format="%d"),
-                        "Supervivencia_%": st.column_config.ProgressColumn(
-                            "Supervivencia %",
-                            format="%.1f%%",
-                            min_value=0,
-                            max_value=100
-                        )
-                    }
-                )
-            
-            with col2:
-                # Funds by year of closure
-                yearly_closure = filtered_lifecycle[filtered_lifecycle['Año_Baja'].notna()].groupby('Año_Baja')['N_Registro'].count()
-                yearly_closure = yearly_closure.sort_index(ascending=False).head(10)
-                
-                st.markdown("**⚰️ Liquidaciones por Año** *(últimos 10 años)*")
-                yearly_closure_df = pd.DataFrame({
-                    'Año': yearly_closure.index.astype(int),
-                    'Liquidaciones': yearly_closure.values
-                })
-                
-                # Add crisis indicator
-                crisis_years = [2008, 2009, 2010, 2011, 2012, 2020]
-                yearly_closure_df['Crisis'] = yearly_closure_df['Año'].apply(
-                    lambda x: '🔴 Sí' if x in crisis_years else '🟢 No'
-                )
-                
-                st.dataframe(
-                    yearly_closure_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Año": st.column_config.NumberColumn("Año", format="%d"),
-                        "Liquidaciones": st.column_config.NumberColumn("Liquidaciones", format="%d"),
-                        "Crisis": st.column_config.TextColumn("Período Crisis")
-                    }
-                )
-        
-        # Tab 4: Mortality Analysis
-        with stat_tabs[3]:
-            col1, col2, col3 = st.columns(3)
-            
-            # Life duration distribution - only use valid positive values
-            liquidated_funds = filtered_lifecycle[
-                (filtered_lifecycle['Vida_Anos'].notna()) & 
-                (filtered_lifecycle['Vida_Anos'] >= 0)
-            ]
-            
-            with col1:
-                st.markdown("**⏱️ Distribución de Vida de Fondos Liquidados**")
-                if len(liquidated_funds) > 0:
-                    life_bins = pd.cut(liquidated_funds['Vida_Anos'], 
-                                     bins=[0, 1, 3, 5, 10, 100],
-                                     labels=['< 1 año', '1-3 años', '3-5 años', '5-10 años', '> 10 años'])
-                    life_dist = life_bins.value_counts().sort_index()
-                    
-                    life_dist_df = pd.DataFrame({
-                        'Duración': life_dist.index,
-                        'Fondos': life_dist.values,
-                        'Porcentaje': (life_dist.values / life_dist.sum() * 100).round(1)
-                    })
-                    st.dataframe(life_dist_df, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No hay datos de fondos liquidados con vida válida")
-            
-            with col2:
-                st.markdown("**📈 Estadísticas de Supervivencia**")
-                
-                if len(liquidated_funds) > 0:
-                    # Calculate survival stats
-                    median_life = liquidated_funds['Vida_Anos'].median()
-                    q1_life = liquidated_funds['Vida_Anos'].quantile(0.25)
-                    q3_life = liquidated_funds['Vida_Anos'].quantile(0.75)
-                    
-                    st.metric("Mediana de Vida", f"{median_life:.1f} años")
-                    st.metric("25% mueren antes de", f"{q1_life:.1f} años")
-                    st.metric("75% mueren antes de", f"{q3_life:.1f} años")
-                else:
-                    st.info("No hay datos suficientes")
-            
-            with col3:
-                st.markdown("**💡 Insights Clave**")
-                
-                if len(liquidated_funds) > 0:
-                    # Calculate key insights
-                    infant_mortality = len(liquidated_funds[liquidated_funds['Vida_Anos'] < 1]) / len(liquidated_funds) * 100
-                    long_survivors = len(filtered_lifecycle[
-                        (filtered_lifecycle['Vida_Anos'] > 10) | 
-                        ((filtered_lifecycle['Fecha_Baja'].isna()) & 
-                         ((pd.Timestamp.now() - filtered_lifecycle['Fecha_Alta']).dt.days / 365.25 > 10))
-                    ]) / len(filtered_lifecycle) * 100
-                    
-                    st.info(f"""
-                    **Mortalidad Infantil:** {infant_mortality:.1f}% de los fondos liquidados mueren en su primer año
-                    
-                    **Supervivientes a Largo Plazo:** Solo {long_survivors:.1f}% de los fondos superan los 10 años
-                    
-                    **Tasa de Mortalidad Global:** {(liquidated_in_search/total_in_search*100):.1f}% en la selección actual
-                    """)
-                else:
-                    st.info("No hay datos suficientes para calcular insights")
-    
-    else:
-        st.info("No se encontraron fondos con los criterios especificados. Prueba a ajustar los filtros.")
-
-# Tab 2: Enhanced Temporal Analysis
-with tab_list[1]:
-    st.markdown("### 📈 Evolución Temporal del Sesgo de Supervivencia")
-    
-    # Time granularity selector
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-    
-    with col1:
-        time_granularity = st.selectbox(
-            "📅 Granularidad Temporal",
-            options=['Semanal', 'Mensual', 'Trimestral', 'Anual'],
-            index=3,
-            help="Selecciona el período de agregación para el análisis"
-        )
-    
-    with col2:
-        chart_type = st.selectbox(
-            "📊 Tipo de Gráfico",
-            options=['Barras Apiladas', 'Líneas', 'Área', 'Cascada'],
-            index=0,
-            help="Selecciona el tipo de visualización"
-        )
-    
-    with col3:
-        show_moving_avg = st.checkbox(
-            "📉 Media Móvil",
-            value=True,
-            help="Mostrar media móvil del balance neto"
-        )
-    
-    with col4:
-        if time_granularity != 'Anual':
-            # Year selector for non-annual views
-            available_years = sorted(df['year'].unique())
-            selected_years = st.select_slider(
-                "Rango de Años",
-                options=available_years,
-                value=(max(available_years)-5, max(available_years)),
-                help="Selecciona el rango de años a visualizar"
-            )
-        else:
-            selected_years = None
-    
-    # Prepare data based on granularity
-    if time_granularity == 'Semanal':
-        # Weekly aggregation
-        df_temp = df.copy()
-        df_temp['week'] = df_temp['date'].dt.to_period('W')
-        
-        if selected_years:
-            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
-        
-        temporal_stats = df_temp.groupby(['week', 'status']).size().unstack(fill_value=0)
-        temporal_stats.index = temporal_stats.index.to_timestamp()
-        time_label = "Semana"
-        ma_window = 4
-        
-    elif time_granularity == 'Mensual':
-        # Monthly aggregation
-        df_temp = df.copy()
-        
-        if selected_years:
-            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
-        
-        temporal_stats = df_temp.groupby(['year_month', 'status']).size().unstack(fill_value=0)
-        temporal_stats.index = temporal_stats.index.to_timestamp()
-        time_label = "Mes"
-        ma_window = 3
-        
-    elif time_granularity == 'Trimestral':
-        # Quarterly aggregation
-        df_temp = df.copy()
-        df_temp['quarter'] = df_temp['date'].dt.to_period('Q')
-        
-        if selected_years:
-            df_temp = df_temp[(df_temp['year'] >= selected_years[0]) & (df_temp['year'] <= selected_years[1])]
-        
-        temporal_stats = df_temp.groupby(['quarter', 'status']).size().unstack(fill_value=0)
-        temporal_stats.index = temporal_stats.index.to_timestamp()
-        time_label = "Trimestre"
-        ma_window = 4
-        
-    else:  # Annual
-        # Yearly aggregation
-        temporal_stats = df.groupby(['year', 'status']).size().unstack(fill_value=0)
-        temporal_stats.index = pd.to_datetime(temporal_stats.index.astype(str) + '-01-01')
-        time_label = "Año"
-        ma_window = 2
-    
-    # Rename columns for consistency
-    if 'NUEVAS_INSCRIPCIONES' in temporal_stats.columns:
-        temporal_stats = temporal_stats.rename(columns={
-            'NUEVAS_INSCRIPCIONES': 'Altas',
-            'BAJAS': 'Bajas'
-        })
-    
-    # Calculate additional metrics
-    temporal_stats['Balance_Neto'] = temporal_stats.get('Altas', 0) - temporal_stats.get('Bajas', 0)
-    temporal_stats['Mortalidad_%'] = (temporal_stats.get('Bajas', 0) / temporal_stats.get('Altas', 1) * 100).fillna(0)
-    temporal_stats['Acumulado'] = temporal_stats['Balance_Neto'].cumsum()
-    
-    # Calculate moving average if requested
-    if show_moving_avg:
-        temporal_stats['MA_Balance'] = temporal_stats['Balance_Neto'].rolling(window=ma_window, center=True).mean()
-    
-    # Create the main visualization
-    fig = go.Figure()
-    
-    if chart_type == 'Barras Apiladas':
-        # Stacked bar chart with gradient colors
-        fig.add_trace(go.Bar(
-            x=temporal_stats.index,
-            y=temporal_stats.get('Altas', 0),
-            name='🟢 Altas',
-            marker=dict(
-                color='rgba(34, 197, 94, 0.9)',
-                line=dict(color='rgba(34, 197, 94, 1)', width=1)
-            ),
-            text=temporal_stats.get('Altas', 0),
-            textposition='outside',
-            textfont=dict(color='#22c55e', size=10),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Bar(
-            x=temporal_stats.index,
-            y=-temporal_stats.get('Bajas', 0),
-            name='🔴 Bajas',
-            marker=dict(
-                color='rgba(239, 68, 68, 0.9)',
-                line=dict(color='rgba(239, 68, 68, 1)', width=1)
-            ),
-            text=temporal_stats.get('Bajas', 0),
-            textposition='outside',
-            textfont=dict(color='#ef4444', size=10),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
-        ))
-        
-        # Add balance line
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats['Balance_Neto'],
-            name='⚡ Balance Neto',
-            line=dict(color='#fbbf24', width=3, shape='spline'),
-            mode='lines+markers',
-            marker=dict(
-                size=8,
-                color='#fbbf24',
-                line=dict(width=2, color='#1a1a1a'),
-                symbol='diamond'
-            ),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Balance: %{y:+}<extra></extra>'
-        ))
-        
-    elif chart_type == 'Líneas':
-        # Enhanced line chart
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats.get('Altas', 0),
-            name='🟢 Altas',
-            line=dict(color='#22c55e', width=3, shape='spline'),
-            mode='lines+markers',
-            marker=dict(size=6, color='#22c55e'),
-            fill='tozeroy',
-            fillcolor='rgba(34, 197, 94, 0.1)',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats.get('Bajas', 0),
-            name='🔴 Bajas',
-            line=dict(color='#ef4444', width=3, shape='spline'),
-            mode='lines+markers',
-            marker=dict(size=6, color='#ef4444'),
-            fill='tozeroy',
-            fillcolor='rgba(239, 68, 68, 0.1)',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats['Balance_Neto'],
-            name='⚡ Balance',
-            line=dict(color='#fbbf24', width=2, dash='dot'),
-            mode='lines',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Balance: %{y:+}<extra></extra>'
-        ))
-        
-    elif chart_type == 'Área':
-        # Area chart with gradient
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats.get('Altas', 0),
-            name='🟢 Altas',
-            stackgroup='one',
-            fillcolor='rgba(34, 197, 94, 0.4)',
-            line=dict(color='#22c55e', width=2),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Altas: %{y}<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=-temporal_stats.get('Bajas', 0),
-            name='🔴 Bajas',
-            stackgroup='one',
-            fillcolor='rgba(239, 68, 68, 0.4)',
-            line=dict(color='#ef4444', width=2),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Bajas: %{y}<extra></extra>'
-        ))
-        
-    else:  # Cascada (Waterfall)
-        # Waterfall chart for cumulative effect
-        fig.add_trace(go.Waterfall(
-            x=temporal_stats.index,
-            y=temporal_stats['Balance_Neto'],
-            text=[f"{v:+}" for v in temporal_stats['Balance_Neto']],
-            textposition="outside",
-            connector={"line": {"color": "rgba(99, 102, 241, 0.3)", "width": 1}},
-            increasing={"marker": {"color": "rgba(34, 197, 94, 0.8)"}},
-            decreasing={"marker": {"color": "rgba(239, 68, 68, 0.8)"}},
-            totals={"marker": {"color": "rgba(99, 102, 241, 0.8)"}},
-            name="Balance Acumulado"
-        ))
-    
-    # Add moving average if selected
-    if show_moving_avg and 'MA_Balance' in temporal_stats.columns:
-        fig.add_trace(go.Scatter(
-            x=temporal_stats.index,
-            y=temporal_stats['MA_Balance'],
-            name=f'📊 Media Móvil ({ma_window} {time_label.lower()}s)',
-            line=dict(color='#a78bfa', width=2, dash='dash'),
-            mode='lines',
-            opacity=0.7,
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>MA: %{y:.1f}<extra></extra>'
-        ))
-    
-    # Add crisis period annotations
-    crisis_periods = [
-        {"name": "Crisis Financiera", "start": "2008-09-01", "end": "2009-06-01"},
-        {"name": "Crisis Deuda EU", "start": "2011-08-01", "end": "2012-07-01"},
-        {"name": "COVID-19", "start": "2020-02-01", "end": "2020-05-01"}
-    ]
-    
-    for period in crisis_periods:
-        # Only add if within the selected time range
-        if temporal_stats.index[0] <= pd.to_datetime(period["end"]) and temporal_stats.index[-1] >= pd.to_datetime(period["start"]):
-            fig.add_vrect(
-                x0=period["start"],
-                x1=period["end"],
-                fillcolor="rgba(239, 68, 68, 0.08)",
-                layer="below",
-                line_width=0
-            )
-            
-            # Add annotation separately
-            fig.add_annotation(
-                x=pd.to_datetime(period["start"]) + (pd.to_datetime(period["end"]) - pd.to_datetime(period["start"]))/2,
-                y=1,
-                yref="paper",
-                text=period["name"],
-                showarrow=False,
-                font=dict(color="rgba(239, 68, 68, 0.5)", size=10),
-                yanchor="bottom"
-            )
-    
-    # Update layout with dark aesthetic
-    fig.update_layout(
-        title=dict(
-            text=f"<b>Evolución {time_label} | Sesgo de Supervivencia</b><br><sup>Altas vs Bajas de Fondos</sup>",
-            font=dict(size=20, color='#f1f5f9'),
-            x=0.5,
-            xanchor='center'
-        ),
-        xaxis=dict(
-            title="",
-            gridcolor='rgba(255, 255, 255, 0.05)',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='rgba(255, 255, 255, 0.1)',
-            tickfont=dict(color='#94a3b8'),
-            rangeslider=dict(
-                visible=False
-            ),
-            type='date'
-        ),
-        yaxis=dict(
-            title=f"Número de Fondos",
-            gridcolor='rgba(255, 255, 255, 0.05)',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='rgba(255, 255, 255, 0.2)',
-            tickfont=dict(color='#94a3b8')
-        ),
-        plot_bgcolor='#0f0f0f',
-        paper_bgcolor='#0f0f0f',
-        font=dict(family='Inter', color='#e2e8f0'),
-        hovermode='x unified',
-        hoverlabel=dict(
-            bgcolor='rgba(26, 26, 26, 0.95)',
-            font_size=12,
-            font_family='Inter',
-            bordercolor='#333'
-        ),
-        height=600,
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=1.15,
-            xanchor="center",
-            x=0.5,
-            bgcolor='rgba(26, 26, 26, 0.8)',
-            bordercolor='rgba(99, 102, 241, 0.2)',
-            borderwidth=1,
-            font=dict(color='#e2e8f0', size=11)
-        ),
-        margin=dict(t=120, b=60, l=60, r=40),
-        barmode='relative' if chart_type == 'Barras Apiladas' else None
-    )
-    
-    # Add horizontal line at y=0
-    fig.add_hline(
-        y=0,
-        line_color='rgba(255, 255, 255, 0.2)',
-        line_width=1,
-        line_dash="dash"
-    )
-    
-    # Display the chart
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Key Statistics Below Chart
-    st.markdown("---")
-    
-    # Calculate period statistics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    total_altas = temporal_stats.get('Altas', 0).sum()
-    total_bajas = temporal_stats.get('Bajas', 0).sum()
-    balance_total = total_altas - total_bajas
-    avg_mortality = temporal_stats['Mortalidad_%'].mean()
-    
-    # Find worst period
-    worst_period_idx = temporal_stats['Balance_Neto'].idxmin()
-    worst_period_value = temporal_stats.loc[worst_period_idx, 'Balance_Neto']
-    
-    # Find best period
-    best_period_idx = temporal_stats['Balance_Neto'].idxmax()
-    best_period_value = temporal_stats.loc[best_period_idx, 'Balance_Neto']
-    
-    with col1:
-        st.metric(
-            f"Total Altas ({time_label}s: {len(temporal_stats)})",
-            f"{total_altas:,}",
-            f"Media: {(total_altas/len(temporal_stats)):.1f}"
-        )
-    
-    with col2:
-        st.metric(
-            "Total Bajas",
-            f"{total_bajas:,}",
-            f"Media: {(total_bajas/len(temporal_stats)):.1f}"
-        )
-    
-    with col3:
-        st.metric(
-            "Balance Total",
-            f"{balance_total:+,}",
-            f"{'Positivo' if balance_total > 0 else 'Negativo'}",
-            delta_color="normal" if balance_total > 0 else "inverse"
-        )
-    
-    with col4:
-        st.metric(
-            f"Peor {time_label}",
-            f"{worst_period_value:+.0f}",
-            f"{worst_period_idx.strftime('%Y-%m-%d')}",
-            delta_color="inverse"
-        )
-    
-    with col5:
-        st.metric(
-            f"Mejor {time_label}",
-            f"{best_period_value:+.0f}",
-            f"{best_period_idx.strftime('%Y-%m-%d')}"
-        )
-
-# Tab 3: Data Quality Report
-with tab_list[2]:
-    st.markdown("### 🔬 Reporte de Calidad de Datos")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 📊 Resumen de Limpieza de Datos")
-        
-        quality_metrics = {
-            "Registros Originales": quality_report['initial_count'],
-            "Registros con Vida Negativa": quality_report['invalid_dates'],
-            "Registros con Vida > 50 años": quality_report['too_long_life'],
-            "Registros con Vida = 0 días": quality_report['zero_life'],
-            "Registros Válidos Finales": quality_report['final_count'],
-            "Tasa de Datos Válidos": f"{(quality_report['final_count']/quality_report['initial_count']*100):.1f}%"
-        }
-        
-        for metric, value in quality_metrics.items():
-            if isinstance(value, str):
-                st.metric(metric, value)
-            else:
-                st.metric(metric, f"{value:,}")
-    
-    with col2:
-        st.markdown("#### 🚨 Registros Problemáticos Eliminados")
-        
-        if len(quality_report['removed_records']) > 0:
-            st.warning(f"Se eliminaron {len(quality_report['removed_records'])} registros con datos incorrectos")
-            
-            # Show sample of removed records
-            if st.checkbox("Mostrar muestra de registros eliminados"):
-                sample = quality_report['removed_records'].head(10)
-                sample_display = sample[['N_Registro', 'Nombre', 'Fecha_Alta', 'Fecha_Baja', 'Vida_Anos']].copy()
-                sample_display['Problema'] = sample_display['Vida_Anos'].apply(
-                    lambda x: 'Vida negativa' if x < 0 else 'Vida excesiva (>50 años)' if x > 50 else 'Otro'
-                )
-                st.dataframe(sample_display, use_container_width=True, hide_index=True)
-        else:
-            st.success("No se detectaron registros problemáticos")
-    
-    # Data quality visualization
-    st.markdown("---")
-    st.markdown("#### 📈 Visualización de Calidad de Datos")
-    
-    # Create pie chart for data quality
-    fig_quality = go.Figure(data=[go.Pie(
-        labels=['Datos Válidos', 'Vida Negativa', 'Vida Excesiva', 'Otros'],
-        values=[
-            quality_report['final_count'],
-            quality_report['invalid_dates'],
-            quality_report['too_long_life'],
-            quality_report['zero_life']
-        ],
-        hole=.3,
-        marker=dict(colors=['#22c55e', '#ef4444', '#fbbf24', '#94a3b8'])
-    )])
-    
-    fig_quality.update_layout(
-        title="Distribución de Calidad de Datos",
-        height=400,
-        plot_bgcolor='#0f0f0f',
-        paper_bgcolor='#0f0f0f',
-        font=dict(family='Inter', color='#e2e8f0')
-    )
-    
-    st.plotly_chart(fig_quality, use_container_width=True)
-    
-    # Data quality insights
-    st.markdown("""
-    <div class="info-box">
-        <h4>💡 Recomendaciones de Calidad de Datos</h4>
-        <ul style="margin-left: 1rem;">
-            <li>Los registros con vida negativa indican errores en el registro de fechas</li>
-            <li>Vidas superiores a 50 años son probablemente errores de digitación</li>
-            <li>Es importante validar los datos fuente con la CNMV para estos casos</li>
-            <li>La limpieza aplicada mejora la precisión del análisis de supervivencia</li>
-        </ul>
-    </div>
+with tab_network:
+    st.markdown("## Red Gestora — Depositaria")
+    st.markdown(f"""
+    <p style="color: {COLORS['text_muted']}; margin-top: -0.8rem; margin-bottom: 1.5rem;">
+        Cada arista conecta una gestora con la depositaria que custodia sus fondos. 
+        El grosor indica el número de fondos en esa relación. Los clusters revelan los ecosistemas financieros españoles.
+    </p>
     """, unsafe_allow_html=True)
 
-# Footer
+    # Controls
+    nc1, nc2, nc3 = st.columns([1, 1, 2])
+    with nc1:
+        min_edge_weight = st.slider("Mín. fondos por vínculo", 1, 30, 3,
+                                     help="Filtra relaciones con pocos fondos para simplificar el grafo")
+    with nc2:
+        layout_algo = st.selectbox("Layout", ['spring', 'kamada_kawai'], index=0)
+
+    # Build networkx graph
+    filtered_edges = net_edges[net_edges['weight'] >= min_edge_weight]
+
+    G = nx.Graph()
+    for _, row in filtered_edges.iterrows():
+        g_node = f"G|{row['Gestora_short']}"
+        d_node = f"D|{row['Depositaria_short']}"
+        G.add_node(g_node, node_type='gestora', full_name=row['Gestora'],
+                   size=gestora_sizes.get(row['Gestora_short'], 1))
+        G.add_node(d_node, node_type='depositaria', full_name=row['Depositaria'],
+                   size=depositaria_sizes.get(row['Depositaria_short'], 1))
+        G.add_edge(g_node, d_node, weight=row['weight'],
+                   funds=', '.join(row['funds'][:3]))
+
+    if len(G.nodes()) > 0:
+        # Layout
+        if layout_algo == 'spring':
+            pos = nx.spring_layout(G, k=2.5/np.sqrt(len(G.nodes())), iterations=80,
+                                   weight='weight', seed=42)
+        else:
+            pos = nx.kamada_kawai_layout(G, weight='weight')
+
+        # Separate node types
+        gestora_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'gestora']
+        dep_nodes = [n for n, d in G.nodes(data=True) if d['node_type'] == 'depositaria']
+
+        # Build edge traces
+        edge_x, edge_y = [], []
+        edge_weights = []
+        for u, v, d in G.edges(data=True):
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            edge_x += [x0, x1, None]
+            edge_y += [y0, y1, None]
+            edge_weights.append(d['weight'])
+
+        # Create multiple edge traces for varying width
+        fig_net = go.Figure()
+
+        # Draw edges with opacity based on weight
+        max_w = max(edge_weights) if edge_weights else 1
+        for u, v, d in G.edges(data=True):
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            w = d['weight']
+            norm_w = w / max_w
+            fig_net.add_trace(go.Scatter(
+                x=[x0, x1], y=[y0, y1],
+                mode='lines',
+                line=dict(
+                    width=max(0.5, norm_w * 8),
+                    color=f'rgba(226,164,78,{0.08 + norm_w * 0.35})'
+                ),
+                hoverinfo='text',
+                text=f"{u.split('|')[1]} ↔ {v.split('|')[1]}<br>{w} fondos",
+                showlegend=False
+            ))
+
+        # Gestora nodes
+        g_x = [pos[n][0] for n in gestora_nodes]
+        g_y = [pos[n][1] for n in gestora_nodes]
+        g_sizes = [max(8, min(50, G.nodes[n]['size'] * 0.5)) for n in gestora_nodes]
+        g_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos<br>Conexiones: {G.degree(n)}"
+                  for n in gestora_nodes]
+        g_labels = [n.split('|')[1] if G.nodes[n]['size'] > 20 else '' for n in gestora_nodes]
+
+        fig_net.add_trace(go.Scatter(
+            x=g_x, y=g_y,
+            mode='markers+text',
+            marker=dict(
+                size=g_sizes,
+                color=COLORS['accent'],
+                line=dict(width=1.5, color='rgba(226,164,78,0.4)'),
+                opacity=0.9,
+            ),
+            text=g_labels,
+            textposition='top center',
+            textfont=dict(size=8, color=COLORS['text_muted']),
+            hovertext=g_text,
+            hoverinfo='text',
+            name='Gestoras'
+        ))
+
+        # Depositaria nodes
+        d_x = [pos[n][0] for n in dep_nodes]
+        d_y = [pos[n][1] for n in dep_nodes]
+        d_sizes = [max(10, min(55, G.nodes[n]['size'] * 0.4)) for n in dep_nodes]
+        d_text = [f"<b>{n.split('|')[1]}</b><br>{G.nodes[n]['size']} fondos custodiados<br>Conexiones: {G.degree(n)}"
+                  for n in dep_nodes]
+        d_labels = [n.split('|')[1] if G.nodes[n]['size'] > 30 else '' for n in dep_nodes]
+
+        fig_net.add_trace(go.Scatter(
+            x=d_x, y=d_y,
+            mode='markers+text',
+            marker=dict(
+                size=d_sizes,
+                color=COLORS['accent3'],
+                symbol='diamond',
+                line=dict(width=1.5, color='rgba(124,152,133,0.4)'),
+                opacity=0.9,
+            ),
+            text=d_labels,
+            textposition='bottom center',
+            textfont=dict(size=8, color=COLORS['text_muted']),
+            hovertext=d_text,
+            hoverinfo='text',
+            name='Depositarias'
+        ))
+
+        fig_net.update_layout(
+            **PLOTLY_LAYOUT,
+            height=700,
+            showlegend=True,
+            legend=dict(
+                orientation='h', yanchor='top', y=1.05, xanchor='center', x=0.5,
+                font=dict(size=12, color=COLORS['text']),
+                bgcolor='rgba(0,0,0,0)',
+            ),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, visible=False),
+            title=None,
+        )
+
+        st.plotly_chart(fig_net, use_container_width=True)
+
+        # Network stats
+        st.markdown("---")
+        st.markdown("### Métricas de Red")
+        nc1, nc2, nc3, nc4 = st.columns(4)
+
+        with nc1:
+            st.metric("Nodos", f"{len(G.nodes())}", f"{len(gestora_nodes)} gestoras · {len(dep_nodes)} depositarias")
+        with nc2:
+            st.metric("Vínculos", f"{len(G.edges())}", f"mín. {min_edge_weight} fondos")
+        with nc3:
+            if nx.is_connected(G):
+                st.metric("Componentes", "1", "grafo conexo")
+            else:
+                n_comp = nx.number_connected_components(G)
+                st.metric("Componentes", f"{n_comp}", "subgrafos aislados")
+        with nc4:
+            density = nx.density(G)
+            st.metric("Densidad", f"{density:.3f}", "ratio de conexiones")
+
+        # Top centrality
+        st.markdown("### Nodos sistémicos")
+        st.markdown(f"<p style='color:{COLORS['text_muted']}; margin-top:-0.7rem;'>Entidades con mayor centralidad de intermediación — potenciales puntos de fragilidad sistémica.</p>", unsafe_allow_html=True)
+
+        betw = nx.betweenness_centrality(G, weight='weight')
+        deg = nx.degree_centrality(G)
+
+        top_betw = sorted(betw.items(), key=lambda x: -x[1])[:10]
+        centrality_df = pd.DataFrame([{
+            'Entidad': n.split('|')[1],
+            'Tipo': 'Gestora' if n.startswith('G|') else 'Depositaria',
+            'Betweenness': round(v, 4),
+            'Degree': round(deg[n], 4),
+            'Fondos': G.nodes[n]['size'],
+            'Conexiones': G.degree(n)
+        } for n, v in top_betw])
+
+        st.dataframe(centrality_df, use_container_width=True, hide_index=True,
+                     column_config={
+                         'Betweenness': st.column_config.NumberColumn(format='%.4f'),
+                         'Degree': st.column_config.NumberColumn(format='%.4f'),
+                     })
+
+    else:
+        st.info("No hay suficientes datos para el grafo con este filtro. Reduce el mínimo de fondos.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 2 — SURVIVAL ANALYSIS
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab_survival:
+    st.markdown("## Análisis de Supervivencia")
+    st.markdown(f"""
+    <p style="color: {COLORS['text_muted']}; margin-top: -0.8rem; margin-bottom: 1.5rem;">
+        Curvas Kaplan-Meier por cohorte de lanzamiento. ¿Qué probabilidad tiene un fondo de sobrevivir 5, 10 o 15 años?
+    </p>
+    """, unsafe_allow_html=True)
+
+    # ── Kaplan-Meier by cohort ──
+    @st.cache_data
+    def compute_km_curves(_lifecycle):
+        """Compute Kaplan-Meier survival curves by 5-year cohort."""
+        now = pd.Timestamp.now()
+        lc = _lifecycle.copy()
+        lc['duration'] = np.where(
+            lc['Fecha_Baja'].notna(),
+            (lc['Fecha_Baja'] - lc['Fecha_Alta']).dt.days / 365.25,
+            (now - lc['Fecha_Alta']).dt.days / 365.25
+        )
+        lc['event'] = lc['Fecha_Baja'].notna().astype(int)
+        lc['duration'] = lc['duration'].clip(lower=0)
+
+        # Cohorts
+        bins = [2003, 2008, 2013, 2018, 2025]
+        labels = ['2004–2008', '2009–2013', '2014–2018', '2019–2025']
+        lc['cohort'] = pd.cut(lc['Año_Alta'], bins=bins, labels=labels, right=True)
+
+        curves = {}
+        for cohort in labels:
+            subset = lc[lc['cohort'] == cohort].copy()
+            if len(subset) < 10:
+                continue
+
+            # Sort by duration
+            times = sorted(subset['duration'].unique())
+            n_at_risk = len(subset)
+            survival = 1.0
+            curve_t = [0]
+            curve_s = [1.0]
+
+            for t in times:
+                events_at_t = len(subset[(subset['duration'] == t) & (subset['event'] == 1)])
+                censored_at_t = len(subset[(subset['duration'] == t) & (subset['event'] == 0)])
+
+                if n_at_risk > 0 and events_at_t > 0:
+                    survival *= (1 - events_at_t / n_at_risk)
+
+                curve_t.append(t)
+                curve_s.append(survival)
+
+                n_at_risk -= (events_at_t + censored_at_t)
+
+            curves[cohort] = (curve_t, curve_s, len(subset))
+
+        return curves
+
+    km_curves = compute_km_curves(lifecycle)
+
+    cohort_colors = {
+        '2004–2008': COLORS['accent2'],
+        '2009–2013': COLORS['accent'],
+        '2014–2018': COLORS['blue'],
+        '2019–2025': COLORS['accent3'],
+    }
+
+    fig_km = go.Figure()
+    for cohort, (times, surv, n) in km_curves.items():
+        color = cohort_colors.get(cohort, '#888')
+        fig_km.add_trace(go.Scatter(
+            x=times, y=[s * 100 for s in surv],
+            mode='lines',
+            name=f'{cohort} (n={n})',
+            line=dict(color=color, width=2.5, shape='hv'),
+            hovertemplate='<b>%{x:.1f} años</b><br>Supervivencia: %{y:.1f}%<extra>' + cohort + '</extra>'
+        ))
+
+    # Reference lines
+    for pct in [50, 25]:
+        fig_km.add_hline(y=pct, line_dash='dot',
+                         line_color='rgba(255,255,255,0.1)',
+                         annotation_text=f'{pct}%',
+                         annotation_font_color=COLORS['text_muted'],
+                         annotation_font_size=10)
+
+    fig_km.update_layout(
+        **PLOTLY_LAYOUT,
+        height=500,
+        title=dict(text='<b>Curvas de Supervivencia por Cohorte</b>',
+                   font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+        xaxis=dict(title='Años desde registro', range=[0, 21],
+                   gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+        yaxis=dict(title='Probabilidad de supervivencia (%)', range=[0, 105],
+                   gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(color=COLORS['text'], size=11),
+            yanchor='top', y=0.98, xanchor='right', x=0.98
+        )
+    )
+
+    st.plotly_chart(fig_km, use_container_width=True)
+
+    # ── Cohort stats table ──
+    st.markdown("### Tabla de cohortes")
+
+    cohort_stats = []
+    now = pd.Timestamp.now()
+    for cohort, (times, surv, n) in km_curves.items():
+        # Find survival at specific timepoints
+        def surv_at(target_yr):
+            for i in range(len(times)-1, -1, -1):
+                if times[i] <= target_yr:
+                    return surv[i] * 100
+            return 100.0
+
+        subset = lifecycle[
+            lifecycle['Año_Alta'].between(
+                int(cohort.split('–')[0]),
+                int(cohort.split('–')[1])
+            )
+        ]
+        active_n = subset['Activo'].sum()
+        dead_n = (~subset['Activo']).sum()
+        med_vida = subset[subset['Vida_Anos'].notna()]['Vida_Anos'].median()
+
+        cohort_stats.append({
+            'Cohorte': cohort,
+            'Fondos': n,
+            'Activos': int(active_n),
+            'Liquidados': int(dead_n),
+            'Mortalidad %': round(dead_n / n * 100, 1) if n > 0 else 0,
+            'Sup. 3 años %': round(surv_at(3), 1),
+            'Sup. 5 años %': round(surv_at(5), 1),
+            'Sup. 10 años %': round(surv_at(10), 1),
+            'Vida mediana': round(med_vida, 1) if pd.notna(med_vida) else None,
+        })
+
+    st.dataframe(pd.DataFrame(cohort_stats), use_container_width=True, hide_index=True,
+                 column_config={
+                     'Mortalidad %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                     'Sup. 3 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                     'Sup. 5 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                     'Sup. 10 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                 })
+
+    # ── Life distribution histogram ──
+    st.markdown("---")
+    st.markdown("### Distribución de vida de fondos liquidados")
+
+    dead_funds = lifecycle[lifecycle['Vida_Anos'].notna() & (~lifecycle['Activo'])]
+
+    fig_hist = go.Figure()
+    fig_hist.add_trace(go.Histogram(
+        x=dead_funds['Vida_Anos'],
+        nbinsx=40,
+        marker=dict(
+            color=COLORS['accent2'],
+            line=dict(color='rgba(0,0,0,0.3)', width=0.5),
+            opacity=0.85,
+        ),
+        hovertemplate='<b>%{x:.1f} años</b><br>%{y} fondos<extra></extra>'
+    ))
+
+    # Add median line
+    median_val = dead_funds['Vida_Anos'].median()
+    fig_hist.add_vline(x=median_val, line_dash='dash', line_color=COLORS['accent'],
+                       annotation_text=f'Mediana: {median_val:.1f} años',
+                       annotation_font_color=COLORS['accent'],
+                       annotation_font_size=11)
+
+    fig_hist.update_layout(
+        **PLOTLY_LAYOUT,
+        height=400,
+        title=dict(text='<b>¿Cuánto viven los fondos?</b>',
+                   font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+        xaxis=dict(title='Años de vida', gridcolor='rgba(255,255,255,0.04)',
+                   tickfont=dict(color=COLORS['text_muted'])),
+        yaxis=dict(title='Número de fondos', gridcolor='rgba(255,255,255,0.04)',
+                   tickfont=dict(color=COLORS['text_muted'])),
+        bargap=0.05,
+    )
+
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    # Key insight metrics
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    with sc1:
+        infant = (dead_funds['Vida_Anos'] < 1).sum() / len(dead_funds) * 100
+        st.metric("Mortalidad infantil", f"{infant:.0f}%", "mueren antes del 1er año")
+    with sc2:
+        y3 = (dead_funds['Vida_Anos'] < 3).sum() / len(dead_funds) * 100
+        st.metric("< 3 años", f"{y3:.0f}%", "de los liquidados")
+    with sc3:
+        y5 = (dead_funds['Vida_Anos'] < 5).sum() / len(dead_funds) * 100
+        st.metric("< 5 años", f"{y5:.0f}%", "de los liquidados")
+    with sc4:
+        q75 = dead_funds['Vida_Anos'].quantile(0.75)
+        st.metric("Percentil 75", f"{q75:.1f} años", "vida máxima del 75%")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 3 — TEMPORAL EVOLUTION
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab_temporal:
+    st.markdown("## Evolución temporal")
+    st.markdown(f"""
+    <p style="color: {COLORS['text_muted']}; margin-top: -0.8rem; margin-bottom: 1.5rem;">
+        Altas y bajas de fondos a lo largo de dos décadas. Las zonas sombreadas marcan períodos de crisis.
+    </p>
+    """, unsafe_allow_html=True)
+
+    tc1, tc2 = st.columns([1, 3])
+    with tc1:
+        granularity = st.selectbox("Granularidad", ['Anual', 'Trimestral', 'Mensual'], index=0)
+
+    # Aggregate
+    if granularity == 'Anual':
+        ts = df.groupby(['year', 'status']).size().unstack(fill_value=0)
+        ts.index = pd.to_datetime(ts.index.astype(str) + '-07-01')
+    elif granularity == 'Trimestral':
+        df_q = df.copy()
+        df_q['q'] = df_q['date'].dt.to_period('Q')
+        ts = df_q.groupby(['q', 'status']).size().unstack(fill_value=0)
+        ts.index = ts.index.to_timestamp()
+    else:
+        df_m = df.copy()
+        df_m['m'] = df_m['date'].dt.to_period('M')
+        ts = df_m.groupby(['m', 'status']).size().unstack(fill_value=0)
+        ts.index = ts.index.to_timestamp()
+
+    ts = ts.rename(columns={'NUEVAS_INSCRIPCIONES': 'Altas', 'BAJAS': 'Bajas'})
+    if 'Altas' not in ts.columns:
+        ts['Altas'] = 0
+    if 'Bajas' not in ts.columns:
+        ts['Bajas'] = 0
+
+    ts['Neto'] = ts['Altas'] - ts['Bajas']
+    ts['Acumulado'] = ts['Neto'].cumsum()
+
+    # Main chart: dual axis
+    fig_ts = make_subplots(specs=[[{"secondary_y": True}]])
+
+    fig_ts.add_trace(go.Bar(
+        x=ts.index, y=ts['Altas'],
+        name='Altas',
+        marker=dict(color=COLORS['green'], opacity=0.85,
+                    line=dict(width=0)),
+        hovertemplate='<b>%{x|%Y-%m}</b><br>Altas: %{y}<extra></extra>'
+    ), secondary_y=False)
+
+    fig_ts.add_trace(go.Bar(
+        x=ts.index, y=-ts['Bajas'],
+        name='Bajas',
+        marker=dict(color=COLORS['red'], opacity=0.85,
+                    line=dict(width=0)),
+        hovertemplate='<b>%{x|%Y-%m}</b><br>Bajas: %{y}<extra></extra>'
+    ), secondary_y=False)
+
+    fig_ts.add_trace(go.Scatter(
+        x=ts.index, y=ts['Acumulado'],
+        name='Acumulado neto',
+        line=dict(color=COLORS['accent'], width=2.5),
+        mode='lines',
+        hovertemplate='<b>%{x|%Y-%m}</b><br>Acumulado: %{y:+,}<extra></extra>'
+    ), secondary_y=True)
+
+    # Crisis overlays
+    crises = [
+        ("Crisis financiera", "2008-01-01", "2009-12-31"),
+        ("Crisis deuda EU", "2011-06-01", "2012-12-31"),
+        ("COVID-19", "2020-02-01", "2020-09-30"),
+    ]
+    for label, s, e in crises:
+        fig_ts.add_vrect(x0=s, x1=e, fillcolor="rgba(199,93,93,0.07)",
+                         layer="below", line_width=0)
+        fig_ts.add_annotation(
+            x=pd.to_datetime(s) + (pd.to_datetime(e) - pd.to_datetime(s))/2,
+            y=1.02, yref='paper', text=label, showarrow=False,
+            font=dict(size=9, color='rgba(199,93,93,0.5)'))
+
+    fig_ts.add_hline(y=0, line_color='rgba(255,255,255,0.1)', line_width=1)
+
+    fig_ts.update_layout(
+        **PLOTLY_LAYOUT,
+        height=550,
+        barmode='relative',
+        title=dict(text='<b>Altas vs Bajas · Balance acumulado</b>',
+                   font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+        legend=dict(
+            orientation='h', yanchor='top', y=1.12, xanchor='center', x=0.5,
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(color=COLORS['text'], size=11),
+        ),
+        xaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+        yaxis=dict(title='Fondos por período', gridcolor='rgba(255,255,255,0.04)',
+                   tickfont=dict(color=COLORS['text_muted'])),
+        yaxis2=dict(title='Acumulado neto', gridcolor='rgba(255,255,255,0.04)',
+                    tickfont=dict(color=COLORS['text_muted']),
+                    showgrid=False),
+    )
+
+    st.plotly_chart(fig_ts, use_container_width=True)
+
+    # Period stats
+    st.markdown("---")
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    with mc1:
+        worst_idx = ts['Neto'].idxmin()
+        st.metric("Peor período", f"{ts.loc[worst_idx, 'Neto']:+.0f}",
+                  worst_idx.strftime('%Y-%m'))
+    with mc2:
+        best_idx = ts['Neto'].idxmax()
+        st.metric("Mejor período", f"{ts.loc[best_idx, 'Neto']:+.0f}",
+                  best_idx.strftime('%Y-%m'))
+    with mc3:
+        st.metric("Total altas", f"{ts['Altas'].sum():,.0f}")
+    with mc4:
+        st.metric("Total bajas", f"{ts['Bajas'].sum():,.0f}")
+
+    # ── Concentration / HHI over time ──
+    st.markdown("---")
+    st.markdown("### Concentración del mercado (HHI)")
+    st.markdown(f"<p style='color:{COLORS['text_muted']}; margin-top:-0.7rem;'>Índice Herfindahl-Hirschman de gestoras por año. Valores &gt; 1500 indican concentración moderada, &gt; 2500 alta.</p>", unsafe_allow_html=True)
+
+    @st.cache_data
+    def compute_hhi_over_time(_lifecycle):
+        results = []
+        for year in range(2005, 2026):
+            # Funds active in this year
+            active = _lifecycle[
+                (_lifecycle['Fecha_Alta'].dt.year <= year) &
+                ((_lifecycle['Fecha_Baja'].isna()) | (_lifecycle['Fecha_Baja'].dt.year >= year))
+            ]
+            if len(active) < 10:
+                continue
+            shares = active.groupby('Gestora').size() / len(active) * 100
+            hhi = (shares ** 2).sum()
+            top3 = shares.nlargest(3).sum()
+            n_gestoras = len(shares)
+            results.append({'Año': year, 'HHI': round(hhi, 0), 'Top 3 %': round(top3, 1),
+                           'Gestoras activas': n_gestoras})
+        return pd.DataFrame(results)
+
+    hhi_df = compute_hhi_over_time(lifecycle)
+
+    fig_hhi = make_subplots(specs=[[{"secondary_y": True}]])
+
+    fig_hhi.add_trace(go.Bar(
+        x=hhi_df['Año'], y=hhi_df['HHI'],
+        name='HHI',
+        marker=dict(
+            color=[COLORS['accent'] if v > 1500 else COLORS['blue'] for v in hhi_df['HHI']],
+            opacity=0.8
+        ),
+        hovertemplate='<b>%{x}</b><br>HHI: %{y:.0f}<extra></extra>'
+    ), secondary_y=False)
+
+    fig_hhi.add_trace(go.Scatter(
+        x=hhi_df['Año'], y=hhi_df['Gestoras activas'],
+        name='Gestoras activas',
+        line=dict(color=COLORS['accent3'], width=2),
+        mode='lines+markers',
+        marker=dict(size=5),
+        hovertemplate='<b>%{x}</b><br>%{y} gestoras<extra></extra>'
+    ), secondary_y=True)
+
+    # HHI threshold lines
+    fig_hhi.add_hline(y=1500, line_dash='dot', line_color='rgba(255,255,255,0.15)',
+                      annotation_text='Concentración moderada',
+                      annotation_font_color=COLORS['text_muted'],
+                      annotation_font_size=9, secondary_y=False)
+    fig_hhi.add_hline(y=2500, line_dash='dot', line_color='rgba(255,255,255,0.15)',
+                      annotation_text='Concentración alta',
+                      annotation_font_color=COLORS['text_muted'],
+                      annotation_font_size=9, secondary_y=False)
+
+    fig_hhi.update_layout(
+        **PLOTLY_LAYOUT,
+        height=400,
+        title=dict(text='<b>Concentración de gestoras (HHI) y número de actores</b>',
+                   font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+        legend=dict(
+            orientation='h', yanchor='top', y=1.1, xanchor='center', x=0.5,
+            bgcolor='rgba(0,0,0,0)', font=dict(color=COLORS['text'], size=11)),
+        xaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted']),
+                   dtick=2),
+        yaxis=dict(title='HHI', gridcolor='rgba(255,255,255,0.04)',
+                   tickfont=dict(color=COLORS['text_muted'])),
+        yaxis2=dict(title='Gestoras activas', showgrid=False,
+                    tickfont=dict(color=COLORS['text_muted'])),
+    )
+
+    st.plotly_chart(fig_hhi, use_container_width=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 4 — EXPLORER
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab_explorer:
+    st.markdown("## Explorador de fondos")
+
+    # Filters
+    fc1, fc2, fc3 = st.columns([2, 1, 1])
+
+    with fc1:
+        search = st.text_input("Buscar por nombre o Nº registro",
+                               placeholder="Ej: BBVA, Santander, 3043…")
+    with fc2:
+        status_filter = st.selectbox("Estado", ['Todos', 'Activos', 'Liquidados'])
+    with fc3:
+        gestora_list = ['Todas'] + sorted(lifecycle['Gestora'].dropna().unique().tolist())
+        gestora_filter = st.selectbox("Gestora", gestora_list)
+
+    # Apply filters
+    result = lifecycle.copy()
+
+    if search:
+        mask = (
+            result['Nombre'].str.contains(search.upper(), case=False, na=False) |
+            result['N_Registro'].astype(str).str.contains(search, na=False)
+        )
+        result = result[mask]
+
+    if status_filter == 'Activos':
+        result = result[result['Activo']]
+    elif status_filter == 'Liquidados':
+        result = result[~result['Activo']]
+
+    if gestora_filter != 'Todas':
+        result = result[result['Gestora'] == gestora_filter]
+
+    # Stats
+    n_total = len(result)
+    n_active = result['Activo'].sum()
+    n_dead = n_total - n_active
+    avg_life = result[result['Vida_Anos'].notna()]['Vida_Anos'].mean()
+
+    ec1, ec2, ec3, ec4 = st.columns(4)
+    with ec1:
+        st.metric("Encontrados", f"{n_total:,}")
+    with ec2:
+        st.metric("Activos", f"{int(n_active):,}")
+    with ec3:
+        st.metric("Liquidados", f"{int(n_dead):,}")
+    with ec4:
+        st.metric("Vida media", f"{avg_life:.1f} años" if pd.notna(avg_life) else "—")
+
+    if n_total > 0:
+        display = result.copy()
+        display['N_Registro'] = display['N_Registro'].astype(int)
+        display = display.sort_values('Fecha_Alta', ascending=False)
+        display['Estado'] = display['Activo'].map({True: '● Activo', False: '○ Liquidado'})
+        display['Fecha_Alta_str'] = display['Fecha_Alta'].dt.strftime('%Y-%m-%d')
+        display['Fecha_Baja_str'] = display['Fecha_Baja'].dt.strftime('%Y-%m-%d').fillna('—')
+
+        show_cols = ['N_Registro', 'Nombre', 'Estado', 'Fecha_Alta_str', 'Fecha_Baja_str',
+                     'Vida_Anos', 'Gestora', 'Depositaria']
+
+        st.dataframe(
+            display[show_cols],
+            use_container_width=True,
+            hide_index=True,
+            height=500,
+            column_config={
+                'N_Registro': st.column_config.NumberColumn('Nº Reg', width='small'),
+                'Nombre': st.column_config.TextColumn('Fondo', width='large'),
+                'Estado': st.column_config.TextColumn('Estado', width='small'),
+                'Fecha_Alta_str': st.column_config.TextColumn('Alta', width='small'),
+                'Fecha_Baja_str': st.column_config.TextColumn('Baja', width='small'),
+                'Vida_Anos': st.column_config.NumberColumn('Vida (años)', format='%.1f', width='small'),
+                'Gestora': st.column_config.TextColumn('Gestora', width='medium'),
+                'Depositaria': st.column_config.TextColumn('Depositaria', width='medium'),
+            }
+        )
+
+        # Mortality by gestora for the current filter
+        if n_total > 20:
+            st.markdown("---")
+            st.markdown("### Mortalidad por gestora")
+
+            mort_by_g = result.groupby('Gestora').agg(
+                Total=('N_Registro', 'count'),
+                Liquidados=('Activo', lambda x: (~x).sum()),
+                Vida_Media=('Vida_Anos', 'mean')
+            ).round(1)
+            mort_by_g['Mortalidad %'] = (mort_by_g['Liquidados'] / mort_by_g['Total'] * 100).round(1)
+            mort_by_g = mort_by_g[mort_by_g['Total'] >= 3].sort_values('Total', ascending=False).head(15)
+
+            fig_mort = go.Figure()
+            fig_mort.add_trace(go.Bar(
+                y=mort_by_g.index,
+                x=mort_by_g['Total'],
+                name='Total fondos',
+                orientation='h',
+                marker=dict(color=COLORS['blue'], opacity=0.4),
+                hovertemplate='<b>%{y}</b><br>Total: %{x}<extra></extra>'
+            ))
+            fig_mort.add_trace(go.Bar(
+                y=mort_by_g.index,
+                x=mort_by_g['Liquidados'],
+                name='Liquidados',
+                orientation='h',
+                marker=dict(color=COLORS['red'], opacity=0.8),
+                hovertemplate='<b>%{y}</b><br>Liquidados: %{x}<extra></extra>'
+            ))
+
+            fig_mort.update_layout(
+                **PLOTLY_LAYOUT,
+                height=max(350, len(mort_by_g) * 30),
+                barmode='overlay',
+                title=dict(text='<b>Fondos totales vs liquidados por gestora</b>',
+                           font=dict(size=14, color=COLORS['text']), x=0),
+                yaxis=dict(autorange='reversed', tickfont=dict(size=10, color=COLORS['text_muted']),
+                           gridcolor='rgba(255,255,255,0.04)'),
+                xaxis=dict(title='Número de fondos', gridcolor='rgba(255,255,255,0.04)',
+                           tickfont=dict(color=COLORS['text_muted'])),
+                legend=dict(orientation='h', yanchor='top', y=1.08, xanchor='center', x=0.5,
+                            bgcolor='rgba(0,0,0,0)', font=dict(color=COLORS['text'], size=11)),
+            )
+            st.plotly_chart(fig_mort, use_container_width=True)
+
+    else:
+        st.info("No se encontraron fondos con estos filtros.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FOOTER
+# ─────────────────────────────────────────────────────────────────────────────
+
 st.markdown("---")
 st.markdown(f"""
-<div style="text-align: center; color: #64748b; padding: 2rem 0; font-size: 0.875rem;">
-    <p>Este análisis demuestra el severo sesgo de supervivencia en la industria de fondos española.</p>
-    <p>Con una tasa de mortalidad del {mortality_rate:.0f}%, las estadísticas publicadas no reflejan la realidad completa.</p>
-    <p>Datos limpios y validados para mayor precisión analítica.</p>
-    <p style="margin-top: 1rem;">
-        <a href="https://twitter.com/Gsnchez" target="_blank" style="color: #a5b4fc;">@Gsnchez</a> • 
-        <a href="https://bquantfinance.com" target="_blank" style="color: #a5b4fc;">bquantfinance.com</a>
+<div style="text-align: center; padding: 2rem 0 1rem;">
+    <p style="color: {COLORS['text_muted']}; font-size: 0.85rem; margin: 0 0 0.5rem;">
+        {total_deaths:,} fondos liquidados que ya no aparecen en los rankings publicados — eso es sesgo de supervivencia.
+    </p>
+    <p style="color: {COLORS['text_muted']}; font-size: 0.8rem; margin: 0;">
+        <a href="https://twitter.com/Gsnchez" target="_blank" style="color: {COLORS['accent']}; text-decoration: none;">@Gsnchez</a> · 
+        <a href="https://bquantfinance.com" target="_blank" style="color: {COLORS['accent']}; text-decoration: none;">bquantfinance.com</a> · 
+        <a href="https://bquantfundlab.substack.com/" target="_blank" style="color: {COLORS['accent']}; text-decoration: none;">BQuant Fund Lab</a>
     </p>
 </div>
 """, unsafe_allow_html=True)
