@@ -266,6 +266,14 @@ def build_lifecycle(_df):
     lc['Año_Alta'] = lc['Fecha_Alta'].dt.year
     lc['Año_Baja'] = lc['Fecha_Baja'].dt.year
 
+    # Classify structured / "born to die" funds
+    STRUCTURED_PATTERN = r'(?:GARANTIZAD|GARANTI[AZ]|OBJETIVO\s*\d|PLAN\s*RENTAS|PLAZO|VENCIMIENTO|MESES|BUY\s*&?\s*HOLD|HORIZONTE|PROTEC|TARGET|AHORRO\s*AÑO|CAPITAL\s*GARANTIZADO)'
+    YEAR_PATTERN = r'20[0-3]\d|199\d'
+    lc['Estructurado'] = (
+        lc['Nombre'].str.contains(STRUCTURED_PATTERN, case=False, na=False, regex=True) |
+        lc['Nombre'].str.contains(YEAR_PATTERN, na=False, regex=True)
+    )
+
     return lc
 
 
@@ -1385,9 +1393,28 @@ with tab_survival:
     </p>
     """, unsafe_allow_html=True)
 
-    # ── Kaplan-Meier by cohort ──
+    # ── Filter controls ──
+    surv_c1, surv_c2, surv_c3 = st.columns([1.2, 1.2, 2])
+    with surv_c1:
+        fund_filter = st.selectbox("Tipo de fondo", [
+            'Todos los fondos',
+            'Solo fondos normales',
+            'Solo estructurados',
+            'Comparar ambos'
+        ], index=0, help="Estructurados = garantizados, fecha objetivo, horizonte, buy&hold, plazo fijo, etc.")
+    with surv_c2:
+        n_estr = lifecycle['Estructurado'].sum()
+        n_norm = (~lifecycle['Estructurado']).sum()
+        st.markdown(f"""
+        <div style="padding-top: 0.5rem; font-size: 0.8rem; color: {COLORS['text_muted']}; line-height: 1.8;">
+            <span style="color: {COLORS['accent']};">●</span> {n_norm:,} fondos normales<br>
+            <span style="color: {COLORS['accent2']};">●</span> {n_estr:,} estructurados ({n_estr/len(lifecycle)*100:.0f}%)
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Kaplan-Meier computation ──
     @st.cache_data
-    def compute_km_curves(_lifecycle):
+    def compute_km_curves(_lifecycle, filter_type='all'):
         """Compute Kaplan-Meier survival curves by 5-year cohort."""
         now = pd.Timestamp.now()
         lc = _lifecycle.copy()
@@ -1399,7 +1426,11 @@ with tab_survival:
         lc['event'] = lc['Fecha_Baja'].notna().astype(int)
         lc['duration'] = lc['duration'].clip(lower=0)
 
-        # Cohorts
+        if filter_type == 'normal':
+            lc = lc[~lc['Estructurado']]
+        elif filter_type == 'structured':
+            lc = lc[lc['Estructurado']]
+
         bins = [2003, 2008, 2013, 2018, 2025]
         labels = ['2004–2008', '2009–2013', '2014–2018', '2019–2025']
         lc['cohort'] = pd.cut(lc['Año_Alta'], bins=bins, labels=labels, right=True)
@@ -1410,7 +1441,6 @@ with tab_survival:
             if len(subset) < 10:
                 continue
 
-            # Sort by duration
             times = sorted(subset['duration'].unique())
             n_at_risk = len(subset)
             survival = 1.0
@@ -1426,14 +1456,46 @@ with tab_survival:
 
                 curve_t.append(t)
                 curve_s.append(survival)
-
                 n_at_risk -= (events_at_t + censored_at_t)
 
             curves[cohort] = (curve_t, curve_s, len(subset))
 
         return curves
 
-    km_curves = compute_km_curves(lifecycle)
+    @st.cache_data
+    def compute_km_global(_lifecycle, filter_type):
+        """Compute single global KM curve for a subset."""
+        now = pd.Timestamp.now()
+        lc = _lifecycle.copy()
+        lc['duration'] = np.where(
+            lc['Fecha_Baja'].notna(),
+            (lc['Fecha_Baja'] - lc['Fecha_Alta']).dt.days / 365.25,
+            (now - lc['Fecha_Alta']).dt.days / 365.25
+        )
+        lc['event'] = lc['Fecha_Baja'].notna().astype(int)
+        lc['duration'] = lc['duration'].clip(lower=0)
+
+        if filter_type == 'normal':
+            lc = lc[~lc['Estructurado']]
+        elif filter_type == 'structured':
+            lc = lc[lc['Estructurado']]
+
+        times = sorted(lc['duration'].unique())
+        n_at_risk = len(lc)
+        survival = 1.0
+        curve_t = [0]
+        curve_s = [1.0]
+
+        for t in times:
+            events_at_t = len(lc[(lc['duration'] == t) & (lc['event'] == 1)])
+            censored_at_t = len(lc[(lc['duration'] == t) & (lc['event'] == 0)])
+            if n_at_risk > 0 and events_at_t > 0:
+                survival *= (1 - events_at_t / n_at_risk)
+            curve_t.append(t)
+            curve_s.append(survival)
+            n_at_risk -= (events_at_t + censored_at_t)
+
+        return curve_t, curve_s, len(lc)
 
     cohort_colors = {
         '2004–2008': COLORS['accent2'],
@@ -1442,138 +1504,336 @@ with tab_survival:
         '2019–2025': COLORS['accent3'],
     }
 
-    fig_km = go.Figure()
-    for cohort, (times, surv, n) in km_curves.items():
-        color = cohort_colors.get(cohort, '#888')
-        fig_km.add_trace(go.Scatter(
-            x=times, y=[s * 100 for s in surv],
-            mode='lines',
-            name=f'{cohort} (n={n})',
-            line=dict(color=color, width=2.5, shape='hv'),
-            hovertemplate='<b>%{x:.1f} años</b><br>Supervivencia: %{y:.1f}%<extra>' + cohort + '</extra>'
+    # ── COMPARE MODE ──
+    if fund_filter == 'Comparar ambos':
+
+        st.markdown("### Curvas globales: Normales vs Estructurados")
+
+        t_n, s_n, n_n = compute_km_global(lifecycle, 'normal')
+        t_s, s_s, n_s = compute_km_global(lifecycle, 'structured')
+
+        fig_compare = go.Figure()
+
+        fig_compare.add_trace(go.Scatter(
+            x=t_n, y=[s * 100 for s in s_n],
+            mode='lines', name=f'Fondos normales (n={n_n})',
+            line=dict(color=COLORS['accent'], width=2.5, shape='hv'),
+            hovertemplate='<b>%{x:.1f} años</b><br>Sup: %{y:.1f}%<extra>Normales</extra>'
+        ))
+        fig_compare.add_trace(go.Scatter(
+            x=t_s, y=[s * 100 for s in s_s],
+            mode='lines', name=f'Estructurados (n={n_s})',
+            line=dict(color=COLORS['accent2'], width=2.5, shape='hv', dash='dot'),
+            hovertemplate='<b>%{x:.1f} años</b><br>Sup: %{y:.1f}%<extra>Estructurados</extra>'
         ))
 
-    # Reference lines
-    for pct in [50, 25]:
-        fig_km.add_hline(y=pct, line_dash='dot',
-                         line_color='rgba(255,255,255,0.1)',
-                         annotation_text=f'{pct}%',
-                         annotation_font_color=COLORS['text_muted'],
-                         annotation_font_size=10)
+        for pct in [50, 25]:
+            fig_compare.add_hline(y=pct, line_dash='dot',
+                                  line_color='rgba(255,255,255,0.08)',
+                                  annotation_text=f'{pct}%',
+                                  annotation_font_color=COLORS['text_muted'],
+                                  annotation_font_size=10)
 
-    fig_km.update_layout(
-        **PLOTLY_LAYOUT,
-        height=500,
-        title=dict(text='<b>Curvas de Supervivencia por Cohorte</b>',
-                   font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
-        xaxis=dict(title='Años desde registro', range=[0, 21],
-                   gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
-        yaxis=dict(title='Probabilidad de supervivencia (%)', range=[0, 105],
-                   gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
-        legend=dict(
-            bgcolor='rgba(0,0,0,0)',
-            font=dict(color=COLORS['text'], size=11),
-            yanchor='top', y=0.98, xanchor='right', x=0.98
+        fig_compare.update_layout(
+            **PLOTLY_LAYOUT,
+            height=500,
+            title=dict(text='<b>Supervivencia: Fondos Normales vs Estructurados</b>',
+                       font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+            xaxis=dict(title='Años desde registro', range=[0, 21],
+                       gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+            yaxis=dict(title='Probabilidad de supervivencia (%)', range=[0, 105],
+                       gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+            legend=dict(
+                bgcolor='rgba(0,0,0,0)',
+                font=dict(color=COLORS['text'], size=11),
+                yanchor='top', y=0.98, xanchor='right', x=0.98
+            )
         )
-    )
+        st.plotly_chart(fig_compare, use_container_width=True)
 
-    st.plotly_chart(fig_km, use_container_width=True)
-
-    # ── Cohort stats table ──
-    st.markdown("### Tabla de cohortes")
-
-    cohort_stats = []
-    now = pd.Timestamp.now()
-    for cohort, (times, surv, n) in km_curves.items():
-        # Find survival at specific timepoints
-        def surv_at(target_yr):
+        # Delta metrics
+        def _surv_at(times, surv, yr):
             for i in range(len(times)-1, -1, -1):
-                if times[i] <= target_yr:
+                if times[i] <= yr:
                     return surv[i] * 100
             return 100.0
 
-        subset = lifecycle[
-            lifecycle['Año_Alta'].between(
-                int(cohort.split('–')[0]),
-                int(cohort.split('–')[1])
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        for col, yr in zip([dc1, dc2, dc3, dc4], [3, 5, 10, 15]):
+            sn = _surv_at(t_n, s_n, yr)
+            ss = _surv_at(t_s, s_s, yr)
+            delta = sn - ss
+            with col:
+                st.metric(f"Sup. {yr} años",
+                          f"{sn:.0f}% vs {ss:.0f}%",
+                          f"+{delta:.0f} pp normales" if delta > 0 else f"{delta:.0f} pp",
+                          delta_color="normal")
+
+        st.markdown("---")
+
+        # ── Per-cohort comparison small multiples ──
+        st.markdown("### Comparación por cohorte")
+
+        km_norm = compute_km_curves(lifecycle, 'normal')
+        km_estr = compute_km_curves(lifecycle, 'structured')
+
+        cohort_labels = ['2004–2008', '2009–2013', '2014–2018', '2019–2025']
+        fig_multi = make_subplots(rows=1, cols=4, shared_yaxes=True,
+                                  subplot_titles=[f"<b>{c}</b>" for c in cohort_labels],
+                                  horizontal_spacing=0.04)
+
+        for idx, cohort in enumerate(cohort_labels):
+            col = idx + 1
+            show_legend = (idx == 0)
+
+            if cohort in km_norm:
+                t, s, n = km_norm[cohort]
+                fig_multi.add_trace(go.Scatter(
+                    x=t, y=[v*100 for v in s],
+                    mode='lines', name=f'Normales',
+                    line=dict(color=COLORS['accent'], width=2, shape='hv'),
+                    showlegend=show_legend,
+                    hovertemplate=f'<b>{cohort}</b><br>%{{x:.1f}} años: %{{y:.1f}}%<extra>Normales (n={n})</extra>'
+                ), row=1, col=col)
+
+            if cohort in km_estr:
+                t, s, n = km_estr[cohort]
+                fig_multi.add_trace(go.Scatter(
+                    x=t, y=[v*100 for v in s],
+                    mode='lines', name=f'Estructurados',
+                    line=dict(color=COLORS['accent2'], width=2, shape='hv', dash='dot'),
+                    showlegend=show_legend,
+                    hovertemplate=f'<b>{cohort}</b><br>%{{x:.1f}} años: %{{y:.1f}}%<extra>Estructurados (n={n})</extra>'
+                ), row=1, col=col)
+
+            fig_multi.add_hline(y=50, line_dash='dot', line_color='rgba(255,255,255,0.06)',
+                                row=1, col=col)
+
+        fig_multi.update_layout(
+            **PLOTLY_LAYOUT,
+            height=380,
+            legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=COLORS['text'], size=10),
+                        yanchor='top', y=1.15, xanchor='left', x=0.0, orientation='h'),
+        )
+        for i in range(1, 5):
+            fig_multi.update_xaxes(range=[0, 21], tickvals=[0,5,10,15,20], tickfont=dict(size=9, color=COLORS['text_muted']),
+                                    gridcolor='rgba(255,255,255,0.03)', row=1, col=i)
+        fig_multi.update_yaxes(range=[0, 105], gridcolor='rgba(255,255,255,0.03)',
+                                tickfont=dict(size=9, color=COLORS['text_muted']), row=1, col=1)
+
+        st.plotly_chart(fig_multi, use_container_width=True)
+
+        # Comparison summary table
+        st.markdown("### Resumen comparativo")
+        comp_rows = []
+        for cohort in cohort_labels:
+            for label, km_data, tipo in [('Normal', km_norm, 'normal'), ('Estructurado', km_estr, 'structured')]:
+                if cohort not in km_data:
+                    continue
+                t, s, n = km_data[cohort]
+                comp_rows.append({
+                    'Cohorte': cohort,
+                    'Tipo': label,
+                    'n': n,
+                    'Sup. 5 años %': round(_surv_at(t, s, 5), 1),
+                    'Sup. 10 años %': round(_surv_at(t, s, 10), 1),
+                    'Sup. 15 años %': round(_surv_at(t, s, 15), 1),
+                })
+
+        st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True,
+                     column_config={
+                         'Sup. 5 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                         'Sup. 10 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                         'Sup. 15 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                     })
+
+    else:
+        # ── SINGLE VIEW MODE ──
+        filter_map = {
+            'Todos los fondos': 'all',
+            'Solo fondos normales': 'normal',
+            'Solo estructurados': 'structured',
+        }
+        ftype = filter_map[fund_filter]
+        km_curves = compute_km_curves(lifecycle, ftype)
+
+        fig_km = go.Figure()
+        for cohort, (times, surv, n) in km_curves.items():
+            color = cohort_colors.get(cohort, '#888')
+            fig_km.add_trace(go.Scatter(
+                x=times, y=[s * 100 for s in surv],
+                mode='lines',
+                name=f'{cohort} (n={n})',
+                line=dict(color=color, width=2.5, shape='hv'),
+                hovertemplate='<b>%{x:.1f} años</b><br>Supervivencia: %{y:.1f}%<extra>' + cohort + '</extra>'
+            ))
+
+        for pct in [50, 25]:
+            fig_km.add_hline(y=pct, line_dash='dot',
+                             line_color='rgba(255,255,255,0.1)',
+                             annotation_text=f'{pct}%',
+                             annotation_font_color=COLORS['text_muted'],
+                             annotation_font_size=10)
+
+        title_suffix = ''
+        if ftype == 'normal':
+            title_suffix = ' (Solo fondos normales)'
+        elif ftype == 'structured':
+            title_suffix = ' (Solo estructurados)'
+
+        fig_km.update_layout(
+            **PLOTLY_LAYOUT,
+            height=500,
+            title=dict(text=f'<b>Curvas de Supervivencia por Cohorte{title_suffix}</b>',
+                       font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
+            xaxis=dict(title='Años desde registro', range=[0, 21],
+                       gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+            yaxis=dict(title='Probabilidad de supervivencia (%)', range=[0, 105],
+                       gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
+            legend=dict(
+                bgcolor='rgba(0,0,0,0)',
+                font=dict(color=COLORS['text'], size=11),
+                yanchor='top', y=0.98, xanchor='right', x=0.98
             )
-        ]
-        active_n = subset['Activo'].sum()
-        dead_n = (~subset['Activo']).sum()
-        med_vida = subset[subset['Vida_Anos'].notna()]['Vida_Anos'].median()
+        )
+        st.plotly_chart(fig_km, use_container_width=True)
 
-        cohort_stats.append({
-            'Cohorte': cohort,
-            'Fondos': n,
-            'Activos': int(active_n),
-            'Liquidados': int(dead_n),
-            'Mortalidad %': round(dead_n / n * 100, 1) if n > 0 else 0,
-            'Sup. 3 años %': round(surv_at(3), 1),
-            'Sup. 5 años %': round(surv_at(5), 1),
-            'Sup. 10 años %': round(surv_at(10), 1),
-            'Vida mediana': round(med_vida, 1) if pd.notna(med_vida) else None,
-        })
+        # Cohort stats table
+        st.markdown("### Tabla de cohortes")
 
-    st.dataframe(pd.DataFrame(cohort_stats), use_container_width=True, hide_index=True,
-                 column_config={
-                     'Mortalidad %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
-                     'Sup. 3 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
-                     'Sup. 5 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
-                     'Sup. 10 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
-                 })
+        cohort_stats = []
+        now = pd.Timestamp.now()
 
-    # ── Life distribution histogram ──
+        # Get the right subset
+        if ftype == 'normal':
+            lc_sub = lifecycle[~lifecycle['Estructurado']]
+        elif ftype == 'structured':
+            lc_sub = lifecycle[lifecycle['Estructurado']]
+        else:
+            lc_sub = lifecycle
+
+        for cohort, (times, surv, n) in km_curves.items():
+            def surv_at(target_yr):
+                for i in range(len(times)-1, -1, -1):
+                    if times[i] <= target_yr:
+                        return surv[i] * 100
+                return 100.0
+
+            subset = lc_sub[
+                lc_sub['Año_Alta'].between(
+                    int(cohort.split('–')[0]),
+                    int(cohort.split('–')[1])
+                )
+            ]
+            active_n = subset['Activo'].sum()
+            dead_n = (~subset['Activo']).sum()
+            med_vida = subset[subset['Vida_Anos'].notna()]['Vida_Anos'].median()
+
+            cohort_stats.append({
+                'Cohorte': cohort,
+                'Fondos': n,
+                'Activos': int(active_n),
+                'Liquidados': int(dead_n),
+                'Mortalidad %': round(dead_n / n * 100, 1) if n > 0 else 0,
+                'Sup. 3 años %': round(surv_at(3), 1),
+                'Sup. 5 años %': round(surv_at(5), 1),
+                'Sup. 10 años %': round(surv_at(10), 1),
+                'Vida mediana': round(med_vida, 1) if pd.notna(med_vida) else None,
+            })
+
+        st.dataframe(pd.DataFrame(cohort_stats), use_container_width=True, hide_index=True,
+                     column_config={
+                         'Mortalidad %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                         'Sup. 3 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                         'Sup. 5 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                         'Sup. 10 años %': st.column_config.ProgressColumn(format='%.1f%%', min_value=0, max_value=100),
+                     })
+
+    # ── Life distribution histogram (always shown) ──
     st.markdown("---")
     st.markdown("### Distribución de vida de fondos liquidados")
 
-    dead_funds = lifecycle[lifecycle['Vida_Anos'].notna() & (~lifecycle['Activo'])]
+    if fund_filter == 'Solo fondos normales':
+        dead_funds = lifecycle[(lifecycle['Vida_Anos'].notna()) & (~lifecycle['Activo']) & (~lifecycle['Estructurado'])]
+        hist_title = '¿Cuánto viven los fondos? (Solo normales)'
+    elif fund_filter == 'Solo estructurados':
+        dead_funds = lifecycle[(lifecycle['Vida_Anos'].notna()) & (~lifecycle['Activo']) & (lifecycle['Estructurado'])]
+        hist_title = '¿Cuánto viven los fondos? (Solo estructurados)'
+    elif fund_filter == 'Comparar ambos':
+        dead_funds = lifecycle[(lifecycle['Vida_Anos'].notna()) & (~lifecycle['Activo'])]
+        hist_title = '¿Cuánto viven los fondos?'
+    else:
+        dead_funds = lifecycle[(lifecycle['Vida_Anos'].notna()) & (~lifecycle['Activo'])]
+        hist_title = '¿Cuánto viven los fondos?'
 
     fig_hist = go.Figure()
-    fig_hist.add_trace(go.Histogram(
-        x=dead_funds['Vida_Anos'],
-        nbinsx=40,
-        marker=dict(
-            color=COLORS['accent2'],
-            line=dict(color='rgba(0,0,0,0.3)', width=0.5),
-            opacity=0.85,
-        ),
-        hovertemplate='<b>%{x:.1f} años</b><br>%{y} fondos<extra></extra>'
-    ))
 
-    # Add median line
-    median_val = dead_funds['Vida_Anos'].median()
-    fig_hist.add_vline(x=median_val, line_dash='dash', line_color=COLORS['accent'],
-                       annotation_text=f'Mediana: {median_val:.1f} años',
-                       annotation_font_color=COLORS['accent'],
-                       annotation_font_size=11)
+    if fund_filter == 'Comparar ambos':
+        dead_normal = dead_funds[~dead_funds['Estructurado']]
+        dead_estr = dead_funds[dead_funds['Estructurado']]
+        fig_hist.add_trace(go.Histogram(
+            x=dead_normal['Vida_Anos'], nbinsx=40,
+            marker=dict(color=COLORS['accent'], opacity=0.7),
+            name=f'Normales (n={len(dead_normal)})',
+            hovertemplate='<b>%{x:.1f} años</b><br>%{y} fondos<extra>Normales</extra>'
+        ))
+        fig_hist.add_trace(go.Histogram(
+            x=dead_estr['Vida_Anos'], nbinsx=40,
+            marker=dict(color=COLORS['accent2'], opacity=0.7),
+            name=f'Estructurados (n={len(dead_estr)})',
+            hovertemplate='<b>%{x:.1f} años</b><br>%{y} fondos<extra>Estructurados</extra>'
+        ))
+        fig_hist.update_layout(barmode='overlay')
+
+        med_n = dead_normal['Vida_Anos'].median()
+        med_e = dead_estr['Vida_Anos'].median()
+        fig_hist.add_vline(x=med_n, line_dash='dash', line_color=COLORS['accent'],
+                           annotation_text=f'Med. normales: {med_n:.1f}a',
+                           annotation_font_color=COLORS['accent'], annotation_font_size=10,
+                           annotation_position='top left')
+        fig_hist.add_vline(x=med_e, line_dash='dash', line_color=COLORS['accent2'],
+                           annotation_text=f'Med. estructurados: {med_e:.1f}a',
+                           annotation_font_color=COLORS['accent2'], annotation_font_size=10,
+                           annotation_position='top right')
+    else:
+        fig_hist.add_trace(go.Histogram(
+            x=dead_funds['Vida_Anos'], nbinsx=40,
+            marker=dict(color=COLORS['accent2'], line=dict(color='rgba(0,0,0,0.3)', width=0.5), opacity=0.85),
+            hovertemplate='<b>%{x:.1f} años</b><br>%{y} fondos<extra></extra>'
+        ))
+        median_val = dead_funds['Vida_Anos'].median()
+        fig_hist.add_vline(x=median_val, line_dash='dash', line_color=COLORS['accent'],
+                           annotation_text=f'Mediana: {median_val:.1f} años',
+                           annotation_font_color=COLORS['accent'], annotation_font_size=11)
 
     fig_hist.update_layout(
         **PLOTLY_LAYOUT,
         height=400,
-        title=dict(text='<b>¿Cuánto viven los fondos?</b>',
+        title=dict(text=f'<b>{hist_title}</b>',
                    font=dict(size=16, color=COLORS['text']), x=0, xanchor='left'),
         xaxis=dict(title='Años de vida', gridcolor='rgba(255,255,255,0.04)',
                    tickfont=dict(color=COLORS['text_muted'])),
         yaxis=dict(title='Número de fondos', gridcolor='rgba(255,255,255,0.04)',
                    tickfont=dict(color=COLORS['text_muted'])),
         bargap=0.05,
+        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=COLORS['text'], size=10),
+                    yanchor='top', y=0.98, xanchor='right', x=0.98),
     )
-
     st.plotly_chart(fig_hist, use_container_width=True)
 
     # Key insight metrics
     sc1, sc2, sc3, sc4 = st.columns(4)
     with sc1:
-        infant = (dead_funds['Vida_Anos'] < 1).sum() / len(dead_funds) * 100
+        infant = (dead_funds['Vida_Anos'] < 1).sum() / len(dead_funds) * 100 if len(dead_funds) > 0 else 0
         st.metric("Mortalidad infantil", f"{infant:.0f}%", "mueren antes del 1er año")
     with sc2:
-        y3 = (dead_funds['Vida_Anos'] < 3).sum() / len(dead_funds) * 100
+        y3 = (dead_funds['Vida_Anos'] < 3).sum() / len(dead_funds) * 100 if len(dead_funds) > 0 else 0
         st.metric("< 3 años", f"{y3:.0f}%", "de los liquidados")
     with sc3:
-        y5 = (dead_funds['Vida_Anos'] < 5).sum() / len(dead_funds) * 100
+        y5 = (dead_funds['Vida_Anos'] < 5).sum() / len(dead_funds) * 100 if len(dead_funds) > 0 else 0
         st.metric("< 5 años", f"{y5:.0f}%", "de los liquidados")
     with sc4:
-        q75 = dead_funds['Vida_Anos'].quantile(0.75)
+        q75 = dead_funds['Vida_Anos'].quantile(0.75) if len(dead_funds) > 0 else 0
         st.metric("Percentil 75", f"{q75:.1f} años", "vida máxima del 75%")
 
 
