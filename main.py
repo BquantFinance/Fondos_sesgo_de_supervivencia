@@ -53,8 +53,6 @@ PLOTLY_LAYOUT = dict(
         bordercolor='rgba(255,255,255,0.1)'
     ),
     margin=dict(t=60, b=40, l=50, r=30),
-    xaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
-    yaxis=dict(gridcolor='rgba(255,255,255,0.04)', tickfont=dict(color=COLORS['text_muted'])),
 )
 
 st.markdown(f"""
@@ -488,7 +486,14 @@ with tab_network:
         ))
 
         fig_net.update_layout(
-            **PLOTLY_LAYOUT,
+            plot_bgcolor=COLORS['bg'],
+            paper_bgcolor=COLORS['bg'],
+            font=dict(family='DM Sans, sans-serif', color=COLORS['text'], size=12),
+            hoverlabel=dict(
+                bgcolor='rgba(20,20,20,0.95)', font_size=12,
+                font_family='DM Sans, sans-serif', bordercolor='rgba(255,255,255,0.1)'
+            ),
+            margin=dict(t=40, b=20, l=20, r=20),
             height=700,
             showlegend=True,
             legend=dict(
